@@ -7,21 +7,27 @@ import (
 )
 
 type RuleResult struct {
-	RuleID string
-	Passed bool
-	Reason string
+	RuleID string `json:"ruleId"`
+	Passed bool   `json:"passed"`
+	Reason string `json:"reason"`
 }
 
+type RuleKind string
+
+const FileExists RuleKind = "file_exists"
+
 type Rule struct {
-	ID        string
-	Criterion string
-	Path      string
+	ID        string   `json:"id"`
+	Criterion string   `json:"criterion"`
+	Kind      RuleKind `json:"kind"`
+	Path      string   `json:"path"`
+	DependsOn []string `json:"dependsOn"`
 }
 
 type Contract struct {
-	ID    string
-	Name  string
-	Rules []Rule
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Rules []Rule `json:"rules"`
 }
 
 func CheckFileExists(projectDir string, rule Rule) (RuleResult, error) {
