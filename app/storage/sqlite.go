@@ -200,35 +200,43 @@ func scanRun(row interface{ Scan(...any) error }) (r backend.Run, err error) {
 	return
 }
 func (s *SQLite) GetRun(id string) (backend.Run, error) {
-	run, err := scanRun(s.db.QueryRow("SELECT id,contract_id,version,project_dir,status,created_at FROM runs WHERE id=?", id))
-	if err != nil {
-		return run, err
-	}
-	rows, err := s.db.Query(`SELECT a.number,a.started_at,a.completed_at,a.status,r.payload
-FROM attempts a LEFT JOIN rule_results r ON a.run_id=r.run_id AND a.number=r.attempt_number
-WHERE a.run_id=? ORDER BY a.number,r.position`, id)
+	run := backend.Run{Attempts: []backend.Attempt{}}
+	// Read status and history in one statement so concurrent appends cannot mix snapshots.
+	rows, err := s.db.Query(`SELECT r.id,r.contract_id,r.version,r.project_dir,r.status,r.created_at,
+a.number,a.started_at,a.completed_at,a.status,rr.payload
+FROM runs r LEFT JOIN attempts a ON r.id=a.run_id
+LEFT JOIN rule_results rr ON a.run_id=rr.run_id AND a.number=rr.attempt_number
+WHERE r.id=? ORDER BY a.number,rr.position`, id)
 	if err != nil {
 		return run, err
 	}
 	defer rows.Close()
+	found := false
 	for rows.Next() {
-		var number int
-		var started, completed string
-		var status backend.ResultStatus
-		var payload sql.NullString
-		if err := rows.Scan(&number, &started, &completed, &status, &payload); err != nil {
+		found = true
+		var number sql.NullInt64
+		var created string
+		var started, completed, status, payload sql.NullString
+		if err := rows.Scan(&run.ID, &run.ContractID, &run.Version, &run.ProjectDir, &run.Status, &created, &number, &started, &completed, &status, &payload); err != nil {
 			return run, err
 		}
-		if len(run.Attempts) == 0 || run.Attempts[len(run.Attempts)-1].Number != number {
-			start, err := time.Parse(time.RFC3339Nano, started)
+		run.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+		if err != nil {
+			return run, err
+		}
+		if !number.Valid {
+			continue
+		}
+		if len(run.Attempts) == 0 || run.Attempts[len(run.Attempts)-1].Number != int(number.Int64) {
+			start, err := time.Parse(time.RFC3339Nano, started.String)
 			if err != nil {
 				return run, err
 			}
-			end, err := time.Parse(time.RFC3339Nano, completed)
+			end, err := time.Parse(time.RFC3339Nano, completed.String)
 			if err != nil {
 				return run, err
 			}
-			run.Attempts = append(run.Attempts, backend.Attempt{Number: number, StartedAt: start, CompletedAt: end, Status: status, Results: []backend.RuleResult{}})
+			run.Attempts = append(run.Attempts, backend.Attempt{Number: int(number.Int64), StartedAt: start, CompletedAt: end, Status: backend.ResultStatus(status.String), Results: []backend.RuleResult{}})
 		}
 		if payload.Valid {
 			var result backend.RuleResult
@@ -239,7 +247,13 @@ WHERE a.run_id=? ORDER BY a.number,r.position`, id)
 			run.Attempts[i].Results = append(run.Attempts[i].Results, result)
 		}
 	}
-	return run, rows.Err()
+	if err := rows.Err(); err != nil {
+		return run, err
+	}
+	if !found {
+		return run, backend.ErrNotFound
+	}
+	return run, nil
 }
 func (s *SQLite) ListRuns() ([]backend.Run, error) {
 	rows, err := s.db.Query("SELECT id,contract_id,version,project_dir,status,created_at FROM runs ORDER BY created_at DESC,id")

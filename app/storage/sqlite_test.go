@@ -201,3 +201,39 @@ func TestConcurrentRechecksAllocateDistinctAttempts(t *testing.T) {
 		}
 	}
 }
+
+func TestConcurrentRunReadsKeepStatusAndHistoryConsistent(t *testing.T) {
+	store, s := openTest(t)
+	c := contract()
+	publish(t, s, c)
+	run, err := s.StartRun(c.ID, 1, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 30; i++ {
+			status := backend.Failed
+			if i%2 == 0 {
+				status = backend.Passed
+			}
+			at := time.Now().UTC()
+			if _, err := store.AppendAttempt(run.ID, backend.Attempt{StartedAt: at, CompletedAt: at, Status: status, Results: []backend.RuleResult{{RuleID: "readme", Status: status, Passed: status == backend.Passed}}}); err != nil {
+				t.Error(err)
+				return
+			}
+		}
+	}()
+	for range 100 {
+		snapshot, err := store.GetRun(run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(snapshot.Attempts) > 0 && snapshot.Status != string(snapshot.Attempts[len(snapshot.Attempts)-1].Status) {
+			t.Error("run status and history came from different snapshots")
+		}
+	}
+	wg.Wait()
+}
