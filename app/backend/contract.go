@@ -7,9 +7,10 @@ import (
 )
 
 type RuleResult struct {
-	RuleID string `json:"ruleId"`
-	Passed bool   `json:"passed"`
-	Reason string `json:"reason"`
+	RuleID string       `json:"ruleId"`
+	Passed bool         `json:"passed"`
+	Reason string       `json:"reason"`
+	Status ResultStatus `json:"status"`
 }
 
 type RuleKind string
@@ -31,7 +32,7 @@ type Contract struct {
 }
 
 func CheckFileExists(projectDir string, rule Rule) (RuleResult, error) {
-	result := RuleResult{RuleID: rule.ID}
+	result := RuleResult{RuleID: rule.ID, Status: OperationalError}
 	root, err := os.OpenRoot(projectDir)
 	if err != nil {
 		return result, fmt.Errorf("open project directory: %w", err)
@@ -40,6 +41,7 @@ func CheckFileExists(projectDir string, rule Rule) (RuleResult, error) {
 
 	info, err := root.Stat(rule.Path)
 	if errors.Is(err, os.ErrNotExist) {
+		result.Status = Failed
 		result.Reason = fmt.Sprintf("%s does not exist", rule.Path)
 		return result, nil
 	}
@@ -47,10 +49,12 @@ func CheckFileExists(projectDir string, rule Rule) (RuleResult, error) {
 		return result, fmt.Errorf("check %q: %w", rule.Path, err)
 	}
 	if !info.Mode().IsRegular() {
+		result.Status = Failed
 		result.Reason = fmt.Sprintf("%s is not a regular file", rule.Path)
 		return result, nil
 	}
 
 	result.Passed = true
+	result.Status = Passed
 	return result, nil
 }
