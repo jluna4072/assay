@@ -1,6 +1,6 @@
 # Persistent runs
 
-`storage.Open(path)` opens a local SQLite database and initializes schema version 1. Drafts, immutable published versions, runs, attempts, and rule results are stored separately. A pure Go SQLite driver keeps backend checks independent of a desktop toolchain.
+`storage.Open(path)` opens a local SQLite database and initializes schema version 1. Drafts, immutable published versions, runs, attempts, and rule results are stored separately. A pure Go SQLite driver keeps the build free of C toolchains.
 
 Create a service with `backend.NewService(store)`. `StartRun(contractID, version, projectDir)` only accepts a published version and an existing project directory. `EvaluateAttempt(runID)` evaluates its frozen rules and appends another attempt. `GetRun` returns the full history; `ListRuns` returns summaries.
 

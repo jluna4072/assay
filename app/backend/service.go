@@ -28,7 +28,7 @@ type Repository interface {
 	ListVersions(string) ([]PublishedContract, error)
 }
 
-// Service is shared by desktop and future MCP callers; it has no UI dependency.
+// Service is shared by the command line and future MCP callers; it has no UI dependency.
 type Service struct {
 	store Repository
 	mu    sync.Mutex
