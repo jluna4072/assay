@@ -4,15 +4,15 @@ Local prototype for contract-driven agent workflows. The current Go proof of con
 
 Run it with `cd app && go run .`.
 
-## Review slices
+## Roadmap
 
-Each slice should be a separate pull request, reviewed before starting the next one:
+Work lands in small pull requests, each reviewed before the next one starts. The prototype currently returns a pass/fail result with a failure reason from a deterministic file-exists check.
 
-1. Return a result and failure reason from a deterministic contract check. (This PR)
-2. Define and validate a versioned graph of acceptance rules and gates (not a prescribed coding order) that users can draft and publish.
-3. Record runs, attempts, and the evidence used for each decision.
-4. Evaluate subjective rules with a user-selected reviewer (Jev or a local/remote model).
-5. Run a worker in an isolated workspace and retry failed attempts within limits.
-6. Expose task requests and run status to external agents through MCP.
-7. Add a minimal desktop graph editor, onboarding, and run-evidence view.
-8. Demonstrate the full flow: MCP request, rejected attempt, retry, and visible evidence.
+1. **Core backend and basic UI.** Draft, validate, and publish versioned contracts (a graph of acceptance rules and their dependencies, not a prescribed coding order); persist runs and attempts in SQLite; add a basic desktop UI for contract forms, a graph preview, and run history.
+2. **Evidence collection.** Collect file contents, diffs, and approved command results per attempt, and block a pass when required evidence is missing.
+3. **Model review.** Evaluate subjective rules with a reviewer (Jev first, then user-selected local or cloud models); reviewer errors never produce a pass.
+4. **Worker and repair loop.** Run a worker in a restricted workspace, return failures as repair context, and retry within attempt and time limits.
+5. **MCP and visual authoring.** Let outside agents request tasks and check status through MCP, and upgrade the graph preview into an editor. Publishing stays under user control.
+6. **Distribution.** Onboarding, plus signed and notarized macOS releases.
+
+The first end-to-end milestone: an outside agent requests a task through MCP, harness rejects a flawed attempt, retries it, and the UI shows the evidence for the final decision.
