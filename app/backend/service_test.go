@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 )
@@ -167,5 +168,28 @@ func TestIncompleteDraftCanBeSavedButNotPublished(t *testing.T) {
 	}
 	if _, err := s.PublishContract("missing"); err != ErrNotFound {
 		t.Fatal(fmt.Sprint("missing draft: ", err))
+	}
+}
+
+func TestValidationReportsEveryProblem(t *testing.T) {
+	c := validContract()
+	c.Name = ""
+	c.Rules[0].Kind = "command"
+	c.Rules[0].DependsOn = []string{"guide"}
+	c.Rules = append(c.Rules, Rule{ID: "guide", Criterion: "again", Kind: FileExists, Path: "x"})
+	problems := ValidationErrors(ValidateContract(c))
+	got := map[string]bool{}
+	for _, p := range problems {
+		got[fmt.Sprintf("%d/%s/%s", p.Rule, p.RuleID, p.Field)] = true
+	}
+	for _, want := range []string{"-1//name", "0/readme/check", "2/guide/id", "1/guide/depends_on"} {
+		if !got[want] {
+			t.Errorf("missing problem %s in %v", want, problems)
+		}
+	}
+	for _, p := range problems {
+		if p.Field == "depends_on" && !strings.Contains(p.Message, "readme → guide → readme") && !strings.Contains(p.Message, "guide → readme → guide") {
+			t.Errorf("cycle message lacks path: %s", p.Message)
+		}
 	}
 }

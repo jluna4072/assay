@@ -4,30 +4,13 @@ package main
 
 import (
 	"fmt"
-	"log"
-
-	"harness/backend"
+	"os"
 )
 
+// This package is the Wails desktop app (main_desktop.go), which only builds
+// with the desktop tag. Without it, point people at the right entry point.
 func main() {
-	contract := backend.Contract{
-		ID:   "help-me",
-		Name: "Help me contract",
-		Rules: []backend.Rule{
-			{
-				ID:        "help-me-rule",
-				Criterion: "project should contain README.md within the directory",
-				Path:      "README.md",
-			},
-		},
-	}
-
-	result, err := backend.CheckFileExists("../test", contract.Rules[0])
-	if err != nil {
-		log.Fatal(err)
-	}
-	fmt.Printf("rule %s passed: %t\n", result.RuleID, result.Passed)
-	if !result.Passed {
-		fmt.Println(result.Reason)
-	}
+	fmt.Fprintln(os.Stderr, `This package is the harness desktop app. Build it with "wails build" or "wails dev".
+For the command line, run "go run ./cmd/harness" from app/, or install it with "go install ./cmd/harness".`)
+	os.Exit(64)
 }

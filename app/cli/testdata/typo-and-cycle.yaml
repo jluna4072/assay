@@ -1,0 +1,14 @@
+id: docs
+name: Documentation
+rules:
+  - id: readme
+    criterion: Project has a README
+    check: file_exists
+    path: README.md
+    depends_on: [guide]
+  - id: guide
+    criterion: Project has a guide
+    check: file_exists
+    path: docs/guide.md
+    depend_on: [readme]
+    depends_on: [readme]
