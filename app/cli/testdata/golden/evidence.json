@@ -1,0 +1,28 @@
+{
+  "schema": 1,
+  "run": "RUN_ID",
+  "attempt": 2,
+  "rule": "guide",
+  "items": [
+    {
+      "kind": "file",
+      "path": "docs/guide.md",
+      "size": 15,
+      "sha256": "a463a755151dde025669a8fc7cf26bc831a7b83b354ec3d7724b54a8b2cf54fa",
+      "item": 1,
+      "content": "How to use it.\n"
+    },
+    {
+      "kind": "diff",
+      "paths": [
+        "docs"
+      ],
+      "baseline": "HASH",
+      "files": 1,
+      "size": 151,
+      "sha256": "9f5507d5234469eb3299fd9bdae4b9e23197b6b73c6af63f8534f06f77a0ca25",
+      "item": 2,
+      "content": "diff --git a/docs/guide.md b/docs/guide.md\nnew file mode 100644\nindex HASH..HASH\n--- /dev/null\n+++ b/docs/guide.md\n@@ -0,0 +1 @@\n+How to use it.\n"
+    }
+  ]
+}

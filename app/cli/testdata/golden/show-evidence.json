@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "run": {
+    "id": "RUN_ID",
+    "shortId": "SHORT",
+    "contract": "docs",
+    "version": 1,
+    "projectDir": "PROJECT",
+    "baseline": "HASH",
+    "status": "passed",
+    "createdAt": "TIME",
+    "attempts": [
+      {
+        "number": 2,
+        "status": "passed",
+        "startedAt": "TIME",
+        "completedAt": "TIME",
+        "results": [
+          {
+            "rule": "readme",
+            "status": "passed",
+            "evidence": [
+              {
+                "kind": "file",
+                "path": "README.md",
+                "size": 7,
+                "sha256": "31ca6c61ca3fcc54029a62bd082448b88718b913d24e195794969dd2d123b990"
+              }
+            ]
+          },
+          {
+            "rule": "guide",
+            "status": "passed",
+            "evidence": [
+              {
+                "kind": "file",
+                "path": "docs/guide.md",
+                "size": 15,
+                "sha256": "a463a755151dde025669a8fc7cf26bc831a7b83b354ec3d7724b54a8b2cf54fa"
+              },
+              {
+                "kind": "diff",
+                "paths": [
+                  "docs"
+                ],
+                "baseline": "HASH",
+                "files": 1,
+                "size": 151,
+                "sha256": "9f5507d5234469eb3299fd9bdae4b9e23197b6b73c6af63f8534f06f77a0ca25"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

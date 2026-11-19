@@ -144,3 +144,47 @@ func TestMarshalRoundTrip(t *testing.T) {
 		t.Fatalf("round trip: %+v %v", again.Contract, again.Problems)
 	}
 }
+
+func TestEvidence(t *testing.T) {
+	src := valid + `    evidence:
+      - file: docs/guide.md
+      - diff: {}
+      - diff: {paths: [docs]}
+`
+	result := Parse([]byte(src))
+	if !result.Valid() {
+		t.Fatalf("problems: %v", result.Problems)
+	}
+	want := []backend.EvidenceSpec{
+		{Kind: backend.FileEvidence, Path: "docs/guide.md"},
+		{Kind: backend.DiffEvidence},
+		{Kind: backend.DiffEvidence, Paths: []string{"docs"}},
+	}
+	if got := result.Contract.Rules[1].Evidence; !reflect.DeepEqual(got, want) {
+		t.Fatalf("evidence: %+v", got)
+	}
+	data, err := Marshal(result.Contract)
+	if err != nil || string(data) != src {
+		t.Fatalf("marshal round trip:\n%s", data)
+	}
+
+	bad := Parse([]byte(valid + `    evidence:
+      - diff:
+      - {file: a, diff: {}}
+      - file: ../outside
+      - command: go-test
+`))
+	got := make([]string, len(bad.Problems))
+	for i, p := range bad.Problems {
+		got[i] = p.String()
+	}
+	wantProblems := []string{
+		`14:5: rule "guide": file evidence path "../outside" must be a relative path inside the project`,
+		`15:9: rule "guide": each evidence item needs exactly one of file: <path> or diff: {} (diff: {paths: [...]} limits it)`,
+		`16:9: rule "guide": each evidence item needs exactly one of file: <path> or diff: {} (diff: {paths: [...]} limits it)`,
+		`18: unknown key "command"`,
+	}
+	if !reflect.DeepEqual(got, wantProblems) {
+		t.Fatalf("problems:\n got  %q\n want %q", got, wantProblems)
+	}
+}

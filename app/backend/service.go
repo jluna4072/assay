@@ -104,7 +104,10 @@ func SameContent(a, b Contract) bool {
 	}
 	for i := range a.Rules {
 		x, y := a.Rules[i], b.Rules[i]
-		if x.ID != y.ID || x.Criterion != y.Criterion || x.Kind != y.Kind || x.Path != y.Path || !slices.Equal(x.DependsOn, y.DependsOn) {
+		if x.ID != y.ID || x.Criterion != y.Criterion || x.Kind != y.Kind || x.Path != y.Path || !slices.Equal(x.DependsOn, y.DependsOn) ||
+			!slices.EqualFunc(x.Evidence, y.Evidence, func(a, b EvidenceSpec) bool {
+				return a.Kind == b.Kind && a.Path == b.Path && slices.Equal(a.Paths, b.Paths)
+			}) {
 			return false
 		}
 	}

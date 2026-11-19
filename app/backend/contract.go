@@ -7,10 +7,11 @@ import (
 )
 
 type RuleResult struct {
-	RuleID string       `json:"ruleId"`
-	Passed bool         `json:"passed"`
-	Reason string       `json:"reason"`
-	Status ResultStatus `json:"status"`
+	RuleID   string       `json:"ruleId"`
+	Passed   bool         `json:"passed"`
+	Reason   string       `json:"reason"`
+	Status   ResultStatus `json:"status"`
+	Evidence []Evidence   `json:"evidence,omitempty"`
 }
 
 type RuleKind string
@@ -18,11 +19,12 @@ type RuleKind string
 const FileExists RuleKind = "file_exists"
 
 type Rule struct {
-	ID        string   `json:"id"`
-	Criterion string   `json:"criterion"`
-	Kind      RuleKind `json:"kind"`
-	Path      string   `json:"path"`
-	DependsOn []string `json:"dependsOn"`
+	ID        string         `json:"id"`
+	Criterion string         `json:"criterion"`
+	Kind      RuleKind       `json:"kind"`
+	Path      string         `json:"path"`
+	DependsOn []string       `json:"dependsOn"`
+	Evidence  []EvidenceSpec `json:"evidence,omitempty"`
 }
 
 type Contract struct {

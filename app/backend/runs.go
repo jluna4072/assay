@@ -23,12 +23,16 @@ type Attempt struct {
 	CompletedAt time.Time    `json:"completedAt"`
 	Status      ResultStatus `json:"status"`
 	Results     []RuleResult `json:"results"`
+	// Blobs holds evidence content keyed by Evidence.Blob, for the
+	// repository to store with the attempt. Reads leave it empty.
+	Blobs map[string][]byte `json:"-"`
 }
 type Run struct {
 	ID         string    `json:"id"`
 	ContractID string    `json:"contractId"`
 	Version    int       `json:"version"`
 	ProjectDir string    `json:"projectDir"`
+	Baseline   string    `json:"baseline"` // git commit at the start of the run, if any
 	Status     string    `json:"status"`
 	CreatedAt  time.Time `json:"createdAt"`
 	Attempts   []Attempt `json:"attempts"`
@@ -38,8 +42,10 @@ type RunRepository interface {
 	CreateRun(Run) error
 	GetRun(string) (Run, error)
 	ListRuns() ([]Run, error)
-	// AppendAttempt atomically numbers an attempt, saves results, and updates the run.
+	// AppendAttempt atomically numbers an attempt, saves results and evidence
+	// blobs, and updates the run.
 	AppendAttempt(string, Attempt) (Run, error)
+	GetBlob(string) ([]byte, error)
 }
 
 func (s *Service) runRepository() (RunRepository, error) {
@@ -73,7 +79,7 @@ func (s *Service) StartRun(contractID string, version int, projectDir string) (R
 	if !info.IsDir() {
 		return Run{}, fmt.Errorf("project must be a directory")
 	}
-	run := Run{ID: rand.Text(), ContractID: contractID, Version: version, ProjectDir: path, Status: "ready", CreatedAt: time.Now().UTC(), Attempts: []Attempt{}}
+	run := Run{ID: rand.Text(), ContractID: contractID, Version: version, ProjectDir: path, Baseline: Baseline(path), Status: "ready", CreatedAt: time.Now().UTC(), Attempts: []Attempt{}}
 	if err := store.CreateRun(run); err != nil {
 		return Run{}, err
 	}
@@ -86,6 +92,16 @@ func (s *Service) GetRun(id string) (Run, error) {
 	}
 	return store.GetRun(id)
 }
+
+// GetEvidence returns stored evidence content by its Evidence.Blob key.
+func (s *Service) GetEvidence(blob string) ([]byte, error) {
+	store, err := s.runRepository()
+	if err != nil {
+		return nil, err
+	}
+	return store.GetBlob(blob)
+}
+
 func (s *Service) ListRuns() ([]Run, error) {
 	store, err := s.runRepository()
 	if err != nil {
@@ -112,6 +128,7 @@ func (s *Service) EvaluateAttempt(runID string) (Run, error) {
 		return Run{}, err
 	}
 	attempt := Attempt{StartedAt: time.Now().UTC(), Status: Passed}
+	evidence := newCollector(run.ProjectDir, run.Baseline)
 	rules := make(map[string]Rule)
 	for _, rule := range published.Contract.Rules {
 		rules[rule.ID] = rule
@@ -135,6 +152,16 @@ func (s *Service) EvaluateAttempt(runID string) (Run, error) {
 			result.Status = OperationalError
 			result.Reason = err.Error()
 		}
+		// Evidence is collected with the check, from the same project state.
+		// A rule can't pass if any of its evidence couldn't be collected.
+		for _, spec := range rule.Evidence {
+			item := evidence.collect(spec)
+			result.Evidence = append(result.Evidence, item)
+			if item.Error != "" && result.Status == Passed {
+				result.Status, result.Passed = OperationalError, false
+				result.Reason = fmt.Sprintf("%s evidence couldn't be collected: %s", item.Kind, item.Error)
+			}
+		}
 		results[id] = result
 		return result
 	}
@@ -148,5 +175,6 @@ func (s *Service) EvaluateAttempt(runID string) (Run, error) {
 		}
 	}
 	attempt.CompletedAt = time.Now().UTC()
+	attempt.Blobs = evidence.blobs
 	return store.AppendAttempt(run.ID, attempt)
 }

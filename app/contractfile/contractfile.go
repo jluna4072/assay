@@ -30,11 +30,23 @@ type fileContract struct {
 }
 
 type fileRule struct {
-	ID        string   `yaml:"id"`
-	Criterion string   `yaml:"criterion"`
-	Check     string   `yaml:"check"`
-	Path      string   `yaml:"path"`
-	DependsOn []string `yaml:"depends_on"`
+	ID        string         `yaml:"id"`
+	Criterion string         `yaml:"criterion"`
+	Check     string         `yaml:"check"`
+	Path      string         `yaml:"path"`
+	DependsOn []string       `yaml:"depends_on"`
+	Evidence  []fileEvidence `yaml:"evidence"`
+}
+
+// fileEvidence is one item of a rule's evidence list: exactly one of
+// "file: <path>" or "diff: {paths: [...]}" ("diff: {}" for the whole project).
+type fileEvidence struct {
+	File *string   `yaml:"file,omitempty"`
+	Diff *fileDiff `yaml:"diff,omitempty,flow"`
+}
+
+type fileDiff struct {
+	Paths []string `yaml:"paths,omitempty,flow"`
 }
 
 // Problem is one reason a contract file is invalid. Line and Column are
@@ -164,6 +176,19 @@ func Parse(data []byte) Result {
 			ID: rule.ID, Criterion: rule.Criterion, Kind: backend.RuleKind(rule.Check),
 			Path: rule.Path, DependsOn: rule.DependsOn,
 		}
+		for j, item := range rule.Evidence {
+			switch {
+			case item.File != nil && item.Diff == nil:
+				result.Contract.Rules[i].Evidence = append(result.Contract.Rules[i].Evidence, backend.EvidenceSpec{Kind: backend.FileEvidence, Path: *item.File})
+			case item.Diff != nil && item.File == nil:
+				result.Contract.Rules[i].Evidence = append(result.Contract.Rules[i].Evidence, backend.EvidenceSpec{Kind: backend.DiffEvidence, Paths: item.Diff.Paths})
+			default:
+				line, column := evidencePosition(root, i, j)
+				if !decodeLines[line] {
+					add(Problem{Line: line, Column: column, RuleID: rule.ID, Message: "each evidence item needs exactly one of file: <path> or diff: {} (diff: {paths: [...]} limits it)"})
+				}
+			}
+		}
 	}
 	for _, v := range backend.ValidationErrors(backend.ValidateContract(result.Contract)) {
 		line, column := position(root, v.Rule, v.Field)
@@ -230,6 +255,19 @@ func position(root *yaml.Node, rule int, field string) (line, column int) {
 		return fieldKey.Line, fieldKey.Column
 	}
 	return item.Line, item.Column
+}
+
+// evidencePosition finds item j of rule i's evidence list.
+func evidencePosition(root *yaml.Node, rule, item int) (line, column int) {
+	line, column = position(root, rule, "evidence")
+	_, rules := lookup(root, "rules")
+	if rules == nil || rules.Kind != yaml.SequenceNode || rule >= len(rules.Content) {
+		return
+	}
+	if _, list := lookup(rules.Content[rule], "evidence"); list != nil && list.Kind == yaml.SequenceNode && item < len(list.Content) {
+		return list.Content[item].Line, list.Content[item].Column
+	}
+	return
 }
 
 func lookup(mapping *yaml.Node, key string) (keyNode, value *yaml.Node) {
@@ -310,6 +348,15 @@ func Marshal(contract backend.Contract) ([]byte, error) {
 	}{Version: version, ID: contract.ID, Name: contract.Name, Rules: make([]marshalledRule, len(contract.Rules))}
 	for i, rule := range contract.Rules {
 		file.Rules[i] = marshalledRule{ID: rule.ID, Criterion: rule.Criterion, Check: string(rule.Kind), Path: rule.Path, DependsOn: rule.DependsOn}
+		for _, spec := range rule.Evidence {
+			switch spec.Kind {
+			case backend.FileEvidence:
+				path := spec.Path
+				file.Rules[i].Evidence = append(file.Rules[i].Evidence, fileEvidence{File: &path})
+			case backend.DiffEvidence:
+				file.Rules[i].Evidence = append(file.Rules[i].Evidence, fileEvidence{Diff: &fileDiff{Paths: spec.Paths}})
+			}
+		}
 	}
 	var buf bytes.Buffer
 	encoder := yaml.NewEncoder(&buf)
@@ -324,9 +371,10 @@ func Marshal(contract backend.Contract) ([]byte, error) {
 }
 
 type marshalledRule struct {
-	ID        string   `yaml:"id"`
-	Criterion string   `yaml:"criterion"`
-	Check     string   `yaml:"check"`
-	Path      string   `yaml:"path"`
-	DependsOn []string `yaml:"depends_on,omitempty,flow"`
+	ID        string         `yaml:"id"`
+	Criterion string         `yaml:"criterion"`
+	Check     string         `yaml:"check"`
+	Path      string         `yaml:"path"`
+	DependsOn []string       `yaml:"depends_on,omitempty,flow"`
+	Evidence  []fileEvidence `yaml:"evidence,omitempty"`
 }

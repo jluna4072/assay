@@ -78,6 +78,7 @@ shortened to any unique prefix.
 
 Flags:
   --attempt <n>     Only attempt n
+  --evidence        List the evidence recorded for each rule
   --json            Print one JSON object instead of text
 ` + projectFlagHelp + `
 `,
@@ -92,6 +93,7 @@ type runJSON struct {
 	Contract   string        `json:"contract"`
 	Version    int           `json:"version"`
 	ProjectDir string        `json:"projectDir"`
+	Baseline   string        `json:"baseline,omitempty"`
 	Status     string        `json:"status"`
 	CreatedAt  time.Time     `json:"createdAt"`
 	Attempts   []attemptJSON `json:"attempts"`
@@ -106,20 +108,47 @@ type attemptJSON struct {
 }
 
 type resultJSON struct {
-	Rule   string `json:"rule"`
-	Status string `json:"status"`
-	Reason string `json:"reason,omitempty"`
+	Rule     string         `json:"rule"`
+	Status   string         `json:"status"`
+	Reason   string         `json:"reason,omitempty"`
+	Evidence []evidenceJSON `json:"evidence,omitempty"`
+}
+
+// evidenceJSON describes one recorded evidence item; "harness evidence"
+// prints its content.
+type evidenceJSON struct {
+	Kind      string   `json:"kind"`
+	Path      string   `json:"path,omitempty"`
+	Paths     []string `json:"paths,omitempty"`
+	Baseline  string   `json:"baseline,omitempty"`
+	Files     int      `json:"files,omitempty"`
+	Absent    bool     `json:"absent,omitempty"`
+	Size      int64    `json:"size"`
+	SHA256    string   `json:"sha256,omitempty"`
+	Truncated bool     `json:"truncated,omitempty"`
+	Error     string   `json:"error,omitempty"`
+}
+
+func toEvidenceJSON(item backend.Evidence) evidenceJSON {
+	return evidenceJSON{
+		Kind: string(item.Kind), Path: item.Path, Paths: item.Paths, Baseline: item.Baseline, Files: item.Files,
+		Absent: item.Absent, Size: item.Size, SHA256: item.SHA256, Truncated: item.Truncated, Error: item.Error,
+	}
 }
 
 func toRunJSON(run backend.Run) runJSON {
 	out := runJSON{
 		ID: strings.ToLower(run.ID), ShortID: shortID(run.ID), Contract: run.ContractID, Version: run.Version,
-		ProjectDir: run.ProjectDir, Status: run.Status, CreatedAt: run.CreatedAt, Attempts: []attemptJSON{},
+		ProjectDir: run.ProjectDir, Baseline: run.Baseline, Status: run.Status, CreatedAt: run.CreatedAt, Attempts: []attemptJSON{},
 	}
 	for _, a := range run.Attempts {
 		attempt := attemptJSON{Number: a.Number, Status: string(a.Status), StartedAt: a.StartedAt, CompletedAt: a.CompletedAt, Results: []resultJSON{}}
 		for _, r := range a.Results {
-			attempt.Results = append(attempt.Results, resultJSON{Rule: r.RuleID, Status: string(r.Status), Reason: r.Reason})
+			result := resultJSON{Rule: r.RuleID, Status: string(r.Status), Reason: r.Reason}
+			for _, item := range r.Evidence {
+				result.Evidence = append(result.Evidence, toEvidenceJSON(item))
+			}
+			attempt.Results = append(attempt.Results, result)
 		}
 		out.Attempts = append(out.Attempts, attempt)
 	}
@@ -213,8 +242,9 @@ var severity = map[backend.ResultStatus]int{
 	backend.Passed:           3,
 }
 
-// printResults lists an attempt's rule results, most severe first.
-func printResults(w io.Writer, attempt backend.Attempt) {
+// printResults lists an attempt's rule results, most severe first, with a
+// line per recorded evidence item when withEvidence is set.
+func printResults(w io.Writer, attempt backend.Attempt, withEvidence bool) {
 	results := append([]backend.RuleResult(nil), attempt.Results...)
 	sort.SliceStable(results, func(i, j int) bool { return severity[results[i].Status] < severity[results[j].Status] })
 	width := 0
@@ -235,6 +265,64 @@ func printResults(w io.Writer, attempt backend.Attempt) {
 		} else {
 			fmt.Fprintf(w, "  %s %-*s   %s\n", mark, width, r.RuleID, reason)
 		}
+		if withEvidence {
+			for i, item := range r.Evidence {
+				fmt.Fprintf(w, "      [%d] %s\n", i+1, describeEvidence(item))
+			}
+		}
+	}
+}
+
+// describeEvidence summarizes an evidence item on one line.
+func describeEvidence(item backend.Evidence) string {
+	var subject string
+	switch item.Kind {
+	case backend.FileEvidence:
+		subject = "file " + item.Path
+	case backend.DiffEvidence:
+		subject = "diff since " + shortCommit(item.Baseline)
+		if len(item.Paths) > 0 {
+			subject += " of " + strings.Join(item.Paths, ", ")
+		}
+	default:
+		subject = string(item.Kind)
+	}
+	switch {
+	case item.Error != "":
+		return subject + " · couldn't collect: " + item.Error
+	case item.Absent:
+		return subject + " · absent"
+	}
+	detail := formatSize(item.Size)
+	if item.Kind == backend.DiffEvidence {
+		detail = plural(item.Files, "file") + " changed, " + detail
+	}
+	if item.Truncated {
+		detail += fmt.Sprintf(", first %s stored", formatSize(backend.MaxEvidenceBytes))
+	}
+	return fmt.Sprintf("%s · %s · sha256 %s", subject, detail, item.SHA256[:12])
+}
+
+func shortCommit(hash string) string {
+	switch {
+	case hash == backend.EmptyTree:
+		return "the empty repository"
+	case len(hash) > 7:
+		return hash[:7]
+	case hash == "":
+		return "(no baseline)"
+	}
+	return hash
+}
+
+func formatSize(n int64) string {
+	switch {
+	case n < 1024:
+		return fmt.Sprintf("%d B", n)
+	case n < 1024*1024:
+		return fmt.Sprintf("%.1f KiB", float64(n)/1024)
+	default:
+		return fmt.Sprintf("%.1f MiB", float64(n)/(1024*1024))
 	}
 }
 
@@ -242,7 +330,7 @@ func printResults(w io.Writer, attempt backend.Attempt) {
 func printAttempt(w io.Writer, run backend.Run) {
 	attempt := run.Attempts[len(run.Attempts)-1]
 	fmt.Fprintf(w, "%s@%d · run %s · attempt %d · %s\n\n", run.ContractID, run.Version, shortID(run.ID), attempt.Number, strings.ToUpper(string(attempt.Status)))
-	printResults(w, attempt)
+	printResults(w, attempt, false)
 	counts := map[backend.ResultStatus]int{}
 	for _, r := range attempt.Results {
 		counts[r.Status]++
@@ -434,6 +522,7 @@ func runShowRun(e Env, cmd *command, args []string) int {
 	asJSON := fs.Bool("json", false, "")
 	projectDir := fs.String("project", "", "")
 	only := fs.Int("attempt", 0, "")
+	withEvidence := fs.Bool("evidence", false, "")
 	ids, code, ok := parseFlags(e, cmd, fs, args)
 	if !ok {
 		return code
@@ -479,10 +568,17 @@ func runShowRun(e Env, cmd *command, args []string) int {
 	}
 
 	fmt.Fprintf(e.Stdout, "run %s · %s@%d · %s\n", shortID(run.ID), run.ContractID, run.Version, run.ProjectDir)
-	fmt.Fprintf(e.Stdout, "started %s · %s\n", run.CreatedAt.Local().Format("2006-01-02 15:04"), runStatusLine(run))
+	started := fmt.Sprintf("started %s", run.CreatedAt.Local().Format("2006-01-02 15:04"))
+	if run.Baseline != "" {
+		started += " at " + shortCommit(run.Baseline)
+	}
+	fmt.Fprintf(e.Stdout, "%s · %s\n", started, runStatusLine(run))
 	for _, attempt := range attempts {
 		fmt.Fprintf(e.Stdout, "\nattempt %d · %s · %s\n", attempt.Number, attempt.Status, attempt.StartedAt.Local().Format("2006-01-02 15:04:05"))
-		printResults(e.Stdout, attempt)
+		printResults(e.Stdout, attempt, *withEvidence)
+	}
+	if *withEvidence {
+		fmt.Fprintf(e.Stdout, "\nPrint an item with: harness evidence %s <rule> [--attempt n] [--item n]\n", shortID(run.ID))
 	}
 	return ExitOK
 }
