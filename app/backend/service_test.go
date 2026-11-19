@@ -193,3 +193,29 @@ func TestValidationReportsEveryProblem(t *testing.T) {
 		}
 	}
 }
+
+func TestPublishContentSkipsUnchangedVersions(t *testing.T) {
+	s := NewService(newMemoryRepository())
+	c := validContract()
+	first, changed, err := s.PublishContent(c)
+	if err != nil || !changed || first.Version != 1 {
+		t.Fatalf("first: %+v %v %v", first, changed, err)
+	}
+	c.Rules[0].DependsOn = []string{} // same as no dependencies
+	same, changed, err := s.PublishContent(c)
+	if err != nil || changed || same.Version != 1 {
+		t.Fatalf("unchanged: %+v %v %v", same, changed, err)
+	}
+	c.Rules[0].Path = "README.txt"
+	second, changed, err := s.PublishContent(c)
+	if err != nil || !changed || second.Version != 2 {
+		t.Fatalf("changed: %+v %v %v", second, changed, err)
+	}
+	c.Rules[0].Path = "../outside"
+	if _, _, err := s.PublishContent(c); err == nil {
+		t.Fatal("invalid contract published")
+	}
+	if versions, _ := s.ListVersions(c.ID); len(versions) != 2 {
+		t.Fatalf("versions: %d", len(versions))
+	}
+}

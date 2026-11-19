@@ -298,3 +298,35 @@ func describeTag(tag string) string {
 		return tag
 	}
 }
+
+// Marshal writes a contract in the file format Parse reads.
+func Marshal(contract backend.Contract) ([]byte, error) {
+	version := FormatVersion
+	file := struct {
+		Version int              `yaml:"version"`
+		ID      string           `yaml:"id"`
+		Name    string           `yaml:"name"`
+		Rules   []marshalledRule `yaml:"rules"`
+	}{Version: version, ID: contract.ID, Name: contract.Name, Rules: make([]marshalledRule, len(contract.Rules))}
+	for i, rule := range contract.Rules {
+		file.Rules[i] = marshalledRule{ID: rule.ID, Criterion: rule.Criterion, Check: string(rule.Kind), Path: rule.Path, DependsOn: rule.DependsOn}
+	}
+	var buf bytes.Buffer
+	encoder := yaml.NewEncoder(&buf)
+	encoder.SetIndent(2)
+	if err := encoder.Encode(file); err != nil {
+		return nil, err
+	}
+	if err := encoder.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+type marshalledRule struct {
+	ID        string   `yaml:"id"`
+	Criterion string   `yaml:"criterion"`
+	Check     string   `yaml:"check"`
+	Path      string   `yaml:"path"`
+	DependsOn []string `yaml:"depends_on,omitempty,flow"`
+}

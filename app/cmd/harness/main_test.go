@@ -29,8 +29,15 @@ func TestBinaryExitCodes(t *testing.T) {
 		{[]string{"contract", "validate", bad}, 1},
 		{[]string{"contract", "validate", filepath.Join(dir, "missing.yaml")}, 2},
 		{[]string{"nope"}, 64},
+		{[]string{"init"}, 0},
+		// The test's stdin is not a terminal, so publishing needs --yes.
+		{[]string{"contract", "publish", good}, 64},
+		{[]string{"contract", "publish", good, "--yes"}, 0},
+		{[]string{"contract", "show", "a@1"}, 0},
 	} {
-		err := exec.Command(binary, tc.args...).Run()
+		command := exec.Command(binary, tc.args...)
+		command.Dir = dir
+		err := command.Run()
 		code := 0
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {

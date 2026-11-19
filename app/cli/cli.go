@@ -8,8 +8,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"runtime/debug"
 	"strings"
+
+	"golang.org/x/term"
 )
 
 // Exit codes. Scripts and agents depend on these; don't renumber them.
@@ -26,8 +29,23 @@ const JSONSchema = 1
 // Version is set at release time with -ldflags "-X harness/cli.Version=v0.1.0".
 var Version = "dev"
 
-type env struct {
-	stdout, stderr io.Writer
+// Env is what a command runs against. DefaultEnv describes the real process;
+// tests construct their own.
+type Env struct {
+	Stdout, Stderr io.Writer
+	Dir            string // working directory, where project discovery starts
+	Interactive    bool   // a person is at the terminal (stdin is a TTY)
+}
+
+// DefaultEnv returns the environment of the running process.
+func DefaultEnv() Env {
+	dir, err := os.Getwd()
+	if err != nil {
+		dir = "."
+	}
+	// A real terminal check: /dev/null is also a character device.
+	interactive := term.IsTerminal(int(os.Stdin.Fd()))
+	return Env{Stdout: os.Stdout, Stderr: os.Stderr, Dir: dir, Interactive: interactive}
 }
 
 type command struct {
@@ -35,11 +53,15 @@ type command struct {
 	args    string // argument synopsis for help
 	summary string
 	details string
-	run     func(e env, cmd *command, args []string) int
+	run     func(e Env, cmd *command, args []string) int
 }
 
 var commands = []command{
+	initCommand,
 	validateCommand,
+	publishCommand,
+	versionsCommand,
+	showCommand,
 }
 
 const overview = `harness checks agent work against contracts you publish.
@@ -59,8 +81,8 @@ Run "harness <command> --help" for details on a command.
 
 // Run executes the command line in args (without the program name) and
 // returns the process exit code.
-func Run(args []string, stdout, stderr io.Writer) int {
-	e := env{stdout: stdout, stderr: stderr}
+func Run(args []string, e Env) int {
+	stdout, stderr := e.Stdout, e.Stderr
 	if len(args) == 0 {
 		printOverview(stderr)
 		return ExitUsage
@@ -116,7 +138,7 @@ func equalWords(a, b []string) bool {
 }
 
 // unknown reports an unknown command, listing subcommands when args name a group.
-func unknown(e env, args []string) int {
+func unknown(e Env, args []string) int {
 	var group []command
 	for _, cmd := range commands {
 		if strings.HasPrefix(cmd.name+" ", args[0]+" ") {
@@ -124,15 +146,15 @@ func unknown(e env, args []string) int {
 		}
 	}
 	if len(group) > 0 && (len(args) == 1 || strings.HasPrefix(args[1], "-")) {
-		w := e.stderr
+		w := e.Stderr
 		code := ExitUsage
 		if len(args) > 1 && (args[1] == "-h" || args[1] == "--help" || args[1] == "-help") {
-			w, code = e.stdout, ExitOK
+			w, code = e.Stdout, ExitOK
 		}
 		fmt.Fprintf(w, "Usage:\n  harness %s <command> [arguments]\n\nCommands:\n%s", args[0], commandList(group))
 		return code
 	}
-	fmt.Fprintf(e.stderr, "harness: unknown command %q\nRun \"harness --help\" for usage.\n", strings.Join(args, " "))
+	fmt.Fprintf(e.Stderr, "harness: unknown command %q\nRun \"harness --help\" for usage.\n", strings.Join(args, " "))
 	return ExitUsage
 }
 
@@ -156,17 +178,17 @@ func printCommandHelp(w io.Writer, cmd *command) {
 
 // parseFlags parses flags that may appear before, between, or after
 // positional arguments, and returns the positional ones. "--" ends flags.
-func parseFlags(e env, cmd *command, fs *flag.FlagSet, args []string) ([]string, int, bool) {
+func parseFlags(e Env, cmd *command, fs *flag.FlagSet, args []string) ([]string, int, bool) {
 	fs.SetOutput(io.Discard)
 	var positional []string
 	for {
 		err := fs.Parse(args)
 		if errors.Is(err, flag.ErrHelp) {
-			printCommandHelp(e.stdout, cmd)
+			printCommandHelp(e.Stdout, cmd)
 			return nil, ExitOK, false
 		}
 		if err != nil {
-			fmt.Fprintf(e.stderr, "harness %s: %v\nRun \"harness %s --help\" for usage.\n", cmd.name, err, cmd.name)
+			fmt.Fprintf(e.Stderr, "harness %s: %v\nRun \"harness %s --help\" for usage.\n", cmd.name, err, cmd.name)
 			return nil, ExitUsage, false
 		}
 		rest := fs.Args()

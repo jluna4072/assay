@@ -129,3 +129,18 @@ func TestLoad(t *testing.T) {
 		t.Fatalf("load missing: %v", err)
 	}
 }
+
+func TestMarshalRoundTrip(t *testing.T) {
+	original := Parse([]byte(valid)).Contract
+	data, err := Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != valid {
+		t.Errorf("marshalled form differs from the documented format:\n%s", data)
+	}
+	again := Parse(data)
+	if !again.Valid() || !backend.SameContent(original, again.Contract) {
+		t.Fatalf("round trip: %+v %v", again.Contract, again.Problems)
+	}
+}
