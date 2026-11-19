@@ -2,6 +2,17 @@
 
 Local macOS prototype for contract-driven checks. Create a draft, publish immutable file-existence rules with dependencies, select a project, and inspect saved run attempts. React/TypeScript and React Flow provide the desktop view; Wails calls the shared Go service directly, and SQLite retains history.
 
+## Command line
+
+The `harness` command line is being built alongside the desktop app. It currently validates contract files written in YAML:
+
+```sh
+cd app
+go run ./cmd/harness contract validate path/to/contract.yaml
+```
+
+See [the command line guide](docs/cli.md) for the contract file format, output, and exit codes.
+
 ## Run the desktop app
 
 On macOS, install the Go version in `app/go.mod`, Node.js 24, and Xcode command line tools. From the repository root:
@@ -47,7 +58,7 @@ npm test
 
 Browser tests use a test-only localhost transport to the real Go/SQLite service and a substitute for the native directory dialog. They cover the visible failure/correction/history flow and publication validation. They do not launch a macOS window. CI builds the native macOS app on pushes to `main`; pull requests run only the Linux jobs.
 
-`npm run dev` alone previews the UI; saving and checking require the Wails desktop app. The original single-check CLI demo remains available with `cd app && go run .`.
+`npm run dev` alone previews the UI; saving and checking require the Wails desktop app.
 
 ## Scope
 
@@ -57,7 +68,8 @@ See [contract publication](docs/contracts.md) and [persistent runs](docs/runs.md
 
 ## Roadmap
 
-Work lands in small pull requests, each reviewed before the next one starts. 
+Work lands in small pull requests, each reviewed before the next one starts.
+
 1. **Core backend and basic UI.** Draft, validate, and publish versioned contracts (a graph of acceptance rules and their dependencies, not a prescribed coding order); persist runs and attempts in SQLite; add a basic desktop UI for contract forms, a graph preview, and run history.
 2. **Evidence collection.** Collect file contents, diffs, and approved command results per attempt, and block a pass when required evidence is missing.
 3. **Model review.** Evaluate subjective rules with a reviewer (Jev first, then user-selected local or cloud models); reviewer errors never produce a pass.
