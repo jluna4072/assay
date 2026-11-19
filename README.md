@@ -1,87 +1,70 @@
 # Harness
 
-Local macOS prototype for contract-driven checks. Create a draft, publish immutable file-existence rules with dependencies, select a project, and inspect saved run attempts. React/TypeScript and React Flow provide the desktop view; Wails calls the shared Go service directly, and SQLite retains history.
+A command-line harness for contract-driven checks of agent work. You publish a contract (acceptance rules and the dependencies between them) as a frozen version; harness checks a project against it, records every attempt and why each rule passed or failed, and keeps earlier attempts when you fix things and check again.
 
-## Command line
+## Install
 
-The `harness` command line is being built alongside the desktop app. It can create a project, validate and publish contracts written in YAML, and check a project against them, keeping every attempt:
+Install the Go version named in `app/go.mod`, then from the repository root:
 
 ```sh
-cd app && go install ./cmd/harness   # installs harness into $(go env GOPATH)/bin
+cd app
+go install ./cmd/harness   # puts harness in $(go env GOPATH)/bin
+```
+
+## Try it
+
+```sh
 cd ~/my-project
-harness init
+harness init                                   # creates .harness/ and harness/example.yaml
 harness contract validate harness/example.yaml
-harness contract publish harness/example.yaml
-harness check example        # fails: no README.md
+harness contract publish harness/example.yaml  # freezes example@1
+harness check example                          # fails if there's no README.md
 touch README.md
-harness recheck              # passes; attempt 1's failure is kept
-harness show
+harness recheck                                # passes; attempt 1's failure is kept
+harness show                                   # every attempt, with reasons
 ```
 
-See [the command line guide](docs/cli.md) for the contract file format, output, and exit codes.
+Contracts are YAML files in `harness/`, committed with the project. Published versions, runs, and attempts live in `.harness/harness.db`, which `init` adds to `.gitignore`. Every command accepts `--json`, and exit codes report the verdict (0 passed, 1 failed, 2 couldn't run, 64 usage error), so `harness check` works as a gate in scripts and CI.
 
-## Run the desktop app
+See [the command line guide](docs/cli.md) for the contract format, every command, and the JSON output.
 
-On macOS, install the Go version in `app/go.mod`, Node.js 24, and Xcode command line tools. From the repository root:
+## Develop
 
-```sh
-cd app
-go install github.com/wailsapp/wails/v2/cmd/wails@v2.16.0
-wails dev
-```
-
-`wails build` produces a local development app in `app/build/bin/`. Signing, notarization, and downloadable releases are a later phase.
-
-Data is saved in `~/Library/Application Support/harness/harness.db` on macOS. Set `HARNESS_DATA_DIR` before launching to use a different directory. Credentials are not part of this prototype.
-
-## Try the acceptance flow
-
-1. Create a new draft with the default `readme` rule for `README.md`, then publish version 1.
-2. Choose a project directory without `README.md` and click **Run checks**. Attempt 1 fails with a reason.
-3. Create `README.md` in that directory, then click **Recheck project**. Attempt 2 passes while attempt 1 remains visible.
-4. Close and reopen the app, then select the saved run. Both attempts remain available.
-5. Edit the draft and publish another version. The earlier run stays tied to version 1.
-
-## Validate
-
-Backend checks run independently of the native desktop toolchain:
+From `app/`:
 
 ```sh
-cd app
-go test -race ./...
+gofmt -l .
 go vet ./...
+go test -race ./...
 go build ./...
 ```
 
-Frontend type checks, production build, and browser acceptance tests:
+Tests need no network, credentials, or external tools. `go test ./cli -update` regenerates the JSON golden files in `app/cli/testdata/golden/` when an output change is intended.
 
-```sh
-cd app/frontend
-npm ci
-npm run build
-npx playwright install chromium
-npm test
-```
+| Package | Role |
+|---|---|
+| `cmd/harness` | Entry point |
+| `cli` | Commands, flags, output, exit codes |
+| `contractfile` | Strict YAML contract loading with line-numbered problems |
+| `project` | Finding a project's `.harness/` directory |
+| `backend` | Contracts, validation, publishing, runs, and checks |
+| `storage` | SQLite persistence |
 
-Browser tests use a test-only localhost transport to the real Go/SQLite service and a substitute for the native directory dialog. They cover the visible failure/correction/history flow and publication validation. They do not launch a macOS window. CI builds the native macOS app on pushes to `main`; pull requests run only the Linux jobs.
-
-`npm run dev` alone previews the UI; saving and checking require the Wails desktop app.
+Backend details: [contract publication](docs/contracts.md) and [persistent runs](docs/runs.md).
 
 ## Scope
 
-Current checks support regular-file existence and acceptance dependencies. The graph is a preview; rules are edited with forms. Evidence snapshots, model reviewers, workers, automatic repairs, MCP access, graph drag-and-drop authoring, and releases remain future work.
-
-See [contract publication](docs/contracts.md) and [persistent runs](docs/runs.md) for backend details.
+Current checks support regular-file existence and dependencies between rules. Evidence snapshots, model reviewers, workers, automatic repairs, MCP access, and releases are future work.
 
 ## Roadmap
 
 Work lands in small pull requests, each reviewed before the next one starts.
 
-1. **Core backend and basic UI.** Draft, validate, and publish versioned contracts (a graph of acceptance rules and their dependencies, not a prescribed coding order); persist runs and attempts in SQLite; add a basic desktop UI for contract forms, a graph preview, and run history.
-2. **Evidence collection.** Collect file contents, diffs, and approved command results per attempt, and block a pass when required evidence is missing.
+1. **Core command line.** Contract files, validation, publishing, runs, and attempts in SQLite; a text view of the dependency graph.
+2. **Evidence collection.** Collect file contents, diffs, and user-approved command results per attempt, and block a pass when required evidence is missing.
 3. **Model review.** Evaluate subjective rules with a reviewer (Jev first, then user-selected local or cloud models); reviewer errors never produce a pass.
-4. **Worker and repair loop.** Run a worker in a restricted workspace, return failures as repair context, and retry within attempt and time limits.
-5. **MCP and visual authoring.** Let outside agents request tasks and check status through MCP, and upgrade the graph preview into an editor. Publishing stays under user control.
-6. **Distribution.** Onboarding, plus signed and notarized macOS releases.
+4. **Worker and repair loop.** `harness work` runs a worker in a restricted workspace, returns failures as repair context, and retries within attempt and time limits.
+5. **MCP.** `harness mcp` lets outside agents draft contracts, request tasks, and check status. Publishing stays under user control.
+6. **Distribution.** Release binaries and a Homebrew tap, plus `harness doctor` for setup.
 
-The first end-to-end milestone: an outside agent requests a task through MCP, harness rejects a flawed attempt, retries it, and the UI shows the evidence for the final decision.
+The first end-to-end milestone: an outside agent requests a task through MCP, harness rejects a flawed attempt, retries it, and `harness show` presents the evidence for the final decision.

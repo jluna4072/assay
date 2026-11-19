@@ -1,6 +1,6 @@
 # Command line
 
-`harness` is the command-line interface to the same Go backend the desktop app uses. Build or run it from `app/`:
+`harness` is the command-line interface to the Go backend in `app/backend`. Build or run it from `app/`:
 
 ```sh
 go run ./cmd/harness --help
