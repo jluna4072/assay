@@ -1,0 +1,14 @@
+digraph "release@1 (Release readiness)" {
+  rankdir=TB;
+  node [shape=box, style="rounded,filled", fillcolor="#ffffff", fontname="Helvetica"];
+  "readme" [label="readme\nProject has a README"];
+  "license" [label="license\nProject has a LICENSE"];
+  "guide" [label="guide\nGuide exists"];
+  "changelog" [label="changelog\nChangelog exists"];
+  "notes" [label="notes\nRelease notes say \"ready\""];
+  "guide" -> "readme";
+  "changelog" -> "readme";
+  "changelog" -> "license";
+  "notes" -> "guide";
+  "notes" -> "changelog";
+}

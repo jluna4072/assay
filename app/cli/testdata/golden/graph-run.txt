@@ -1,0 +1,7 @@
+release@1 (Release readiness) · run SHORT, attempt 1
+⊘ notes — blocked: dependency guide did not pass
+├── ✗ guide — docs/guide.md does not exist
+│   └── ✓ readme — Project has a README
+└── ⊘ changelog — blocked: dependency license did not pass
+    ├── ✓ readme — Project has a README
+    └── ✗ license — LICENSE does not exist

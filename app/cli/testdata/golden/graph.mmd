@@ -1,0 +1,11 @@
+flowchart TD
+  r1["readme: Project has a README"]
+  r2["license: Project has a LICENSE"]
+  r3["guide: Guide exists"]
+  r4["changelog: Changelog exists"]
+  r5["notes: Release notes say #quot;ready#quot;"]
+  r3 -->|depends on| r1
+  r4 -->|depends on| r1
+  r4 -->|depends on| r2
+  r5 -->|depends on| r3
+  r5 -->|depends on| r4

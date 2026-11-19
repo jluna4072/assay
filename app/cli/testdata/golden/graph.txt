@@ -1,0 +1,7 @@
+release@1 (Release readiness)
+notes — Release notes say "ready"
+├── guide — Guide exists
+│   └── readme — Project has a README
+└── changelog — Changelog exists
+    ├── readme — Project has a README
+    └── license — Project has a LICENSE

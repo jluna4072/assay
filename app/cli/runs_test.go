@@ -39,17 +39,23 @@ var (
 	runIDPattern = regexp.MustCompile(`\b[a-z2-7]{26}\b`)
 	shortPattern = regexp.MustCompile(`"shortId": "[a-z2-7]{6}"`)
 	timePattern  = regexp.MustCompile(`"\d{4}-\d\d-\d\dT[0-9:.]+Z"`)
+	// Short run IDs in text output ("run abc234"), not rule or contract names.
+	shortRunPattern = regexp.MustCompile(`\brun [a-z2-7]{6}\b`)
 )
 
-// golden compares JSON output with testdata/golden/<name>.json after
-// replacing values that differ on every run.
+// golden compares output with testdata/golden/<name> (".json" when name has
+// no extension) after replacing values that differ on every run.
 func golden(t *testing.T, name, dir, got string) {
 	t.Helper()
 	got = strings.ReplaceAll(got, dir, "PROJECT")
 	got = runIDPattern.ReplaceAllString(got, "RUN_ID")
 	got = shortPattern.ReplaceAllString(got, `"shortId": "SHORT"`)
+	got = shortRunPattern.ReplaceAllString(got, "run SHORT")
 	got = timePattern.ReplaceAllString(got, `"TIME"`)
-	path := filepath.Join("testdata", "golden", name+".json")
+	if filepath.Ext(name) == "" {
+		name += ".json"
+	}
+	path := filepath.Join("testdata", "golden", name)
 	if *update {
 		if err := os.WriteFile(path, []byte(got), 0644); err != nil {
 			t.Fatal(err)

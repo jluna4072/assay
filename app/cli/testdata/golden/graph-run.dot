@@ -1,0 +1,14 @@
+digraph "release@1 (Release readiness) · run SHORT, attempt 1" {
+  rankdir=TB;
+  node [shape=box, style="rounded,filled", fillcolor="#ffffff", fontname="Helvetica"];
+  "readme" [label="readme\nProject has a README", fillcolor="#d3f9d8", color="#2b8a3e", tooltip="passed: "];
+  "license" [label="license\nProject has a LICENSE", fillcolor="#ffe3e3", color="#c92a2a", tooltip="failed: LICENSE does not exist"];
+  "guide" [label="guide\nGuide exists", fillcolor="#ffe3e3", color="#c92a2a", tooltip="failed: docs/guide.md does not exist"];
+  "changelog" [label="changelog\nChangelog exists", fillcolor="#f1f3f5", color="#868e96", tooltip="blocked: dependency license did not pass"];
+  "notes" [label="notes\nRelease notes say \"ready\"", fillcolor="#f1f3f5", color="#868e96", tooltip="blocked: dependency guide did not pass"];
+  "guide" -> "readme";
+  "changelog" -> "readme";
+  "changelog" -> "license";
+  "notes" -> "guide";
+  "notes" -> "changelog";
+}
