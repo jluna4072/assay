@@ -16,4 +16,4 @@ Make the existing acceptance rules and stored decisions usable without adding a 
 
 Local frontend type checking and production build, Go race tests/vet/build, Wails binding generation, and browser acceptance tests pass. Browser tests use the actual Go/SQLite backend through a test-only transport; only directory-dialog selection is substituted. They verify fail → correction → pass, retained history after reload, invalid dependency rejection, and immutable published rules.
 
-Native macOS compilation is checked by GitHub Actions. Interactive macOS window and directory-dialog use still require a manual check on a Mac.
+Native macOS compilation is checked by GitHub Actions on pushes to `main`. Interactive macOS window and directory-dialog use still require a manual check on a Mac.

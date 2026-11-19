@@ -73,6 +73,8 @@ jobs:
 
   desktop:
     name: macOS desktop build
+    # macOS minutes count 10x against the Actions allowance; build on main only.
+    if: github.event_name != 'pull_request'
     runs-on: macos-latest
     timeout-minutes: 15
     defaults:

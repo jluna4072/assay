@@ -45,7 +45,7 @@ npx playwright install chromium
 npm test
 ```
 
-Browser tests use a test-only localhost transport to the real Go/SQLite service and a substitute for the native directory dialog. They cover the visible failure/correction/history flow and publication validation. They do not launch a macOS window. CI also builds the native macOS app.
+Browser tests use a test-only localhost transport to the real Go/SQLite service and a substitute for the native directory dialog. They cover the visible failure/correction/history flow and publication validation. They do not launch a macOS window. CI builds the native macOS app on pushes to `main`; pull requests run only the Linux jobs.
 
 `npm run dev` alone previews the UI; saving and checking require the Wails desktop app. The original single-check CLI demo remains available with `cd app && go run .`.
 
