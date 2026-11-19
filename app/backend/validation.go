@@ -48,6 +48,11 @@ func ValidationErrors(err error) []*ValidationError {
 	return result
 }
 
+// projectPath reports whether path is a usable project-relative path.
+func projectPath(path string) bool {
+	return strings.TrimSpace(path) != "" && filepath.IsLocal(path) && !strings.Contains(path, "\\")
+}
+
 // ValidateContract checks publication requirements and reports every problem
 // it finds, joined into one error. Drafts may be incomplete.
 func ValidateContract(contract Contract) error {
@@ -81,8 +86,24 @@ func ValidateContract(contract Contract) error {
 		if rule.Kind != FileExists {
 			report(i, rule.ID, "check", "unsupported check %q", rule.Kind)
 		}
-		if strings.TrimSpace(rule.Path) == "" || !filepath.IsLocal(rule.Path) || strings.Contains(rule.Path, "\\") {
+		if !projectPath(rule.Path) {
 			report(i, rule.ID, "path", "path must be a relative path inside the project")
+		}
+		for _, spec := range rule.Evidence {
+			switch spec.Kind {
+			case FileEvidence:
+				if !projectPath(spec.Path) {
+					report(i, rule.ID, "evidence", "file evidence path %q must be a relative path inside the project", spec.Path)
+				}
+			case DiffEvidence:
+				for _, path := range spec.Paths {
+					if !projectPath(path) {
+						report(i, rule.ID, "evidence", "diff evidence path %q must be a relative path inside the project", path)
+					}
+				}
+			default:
+				report(i, rule.ID, "evidence", "unsupported evidence %q", spec.Kind)
+			}
 		}
 	}
 

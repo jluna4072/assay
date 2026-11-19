@@ -46,6 +46,32 @@ rules:
 | `rules[].check` | How the rule is checked; `file_exists` is the only check so far |
 | `rules[].path` | Project-relative path for `file_exists` |
 | `rules[].depends_on` | Rules that must pass before this one is checked |
+| `rules[].evidence` | What harness records when it checks the rule (below) |
+
+### Evidence
+
+A rule can ask harness to record evidence each time it's checked, so every decision has an inspectable record of exactly what harness looked at:
+
+```yaml
+  - id: guide
+    criterion: Project has a guide
+    check: file_exists
+    path: docs/guide.md
+    evidence:
+      - file: docs/guide.md        # the file's contents
+      - diff: {}                   # every change since the run started
+      - diff: {paths: [docs]}      # changes under docs/ only
+```
+
+| Item | Records |
+|---|---|
+| `file: <path>` | The file's contents, or that it was absent |
+| `diff: {}` | `git diff` from the commit the project was at when the run started to the files as they are now, including staged, unstaged, and untracked files (not ignored ones, and never `.harness/`). The project's own git index isn't touched. |
+| `diff: {paths: [...]}` | The same, limited to those paths |
+
+Evidence is collected together with the check, from the same project state, and stored in `.harness/harness.db`, so later edits never change what an earlier attempt recorded. Each item is capped at 1 MiB; larger content is stored up to the cap and marked truncated, with its full size and SHA-256 recorded. Evidence is collected for failed rules too, but not for blocked ones, which aren't checked.
+
+**Missing evidence can't produce a pass.** If an item can't be collected (a path is a directory, a symlink leads outside the project, or diff evidence is requested in a project that isn't a git repository), a rule that would have passed is marked `error` instead. An absent file isn't a collection failure: "the file didn't exist" is recorded as the evidence.
 
 Decoding is strict. Unknown keys (such as a misspelled `depend_on`), duplicate keys, wrong types, and a second YAML document in the same file are reported as problems instead of being ignored.
 
@@ -219,6 +245,38 @@ attempt 3 · passed · 2026-11-19 09:51:02
   ✓ guide
 ```
 
+### `harness show --evidence`
+
+Adds a numbered line for each evidence item under its rule:
+
+```
+attempt 2 · passed · 2026-11-19 10:47:46
+  ✓ readme
+      [1] file README.md · 7 B · sha256 31ca6c61ca3f
+  ✓ guide
+      [1] file docs/guide.md · 15 B · sha256 a463a755151d
+      [2] diff since d68d072 of docs · 1 file changed, 151 B · sha256 9f5507d52344
+```
+
+In a git repository, the header also shows the commit the run started at (`started 2026-11-19 10:47 at d68d072`).
+
+### `harness evidence [run] <rule>`
+
+Prints a rule's recorded evidence from the latest attempt (`--attempt <n>` for another), each item under a `==> … <==` header:
+
+```
+$ harness evidence guide
+==> [1] file docs/guide.md · 15 B · sha256 a463a755151d <==
+How to use it.
+
+==> [2] diff since d68d072 of docs · 1 file changed, 151 B · sha256 9f5507d52344 <==
+diff --git a/docs/guide.md b/docs/guide.md
+new file mode 100644
+...
+```
+
+`--item <n>` prints only that item's content, with no header, for piping or saving: `harness evidence guide --item 1 > guide-at-attempt-2.md`. `--json` includes each item's content (as `content`, or `contentBase64` for binary data). It exits 1 if a selected item is an absent file and 2 if one couldn't be collected.
+
 ### Run IDs
 
 Runs are shown by the first six characters of their ID. Anywhere a run ID is accepted, any unique prefix works, in either case. An ambiguous prefix lists the matching runs and exits 64.
@@ -255,7 +313,7 @@ Runs are shown by the first six characters of their ID. Anywhere a run ID is acc
 }
 ```
 
-Run `status` is `ready` (no attempts yet), `passed`, `failed`, or `error`, from the latest attempt. `results` keep the contract's rule order. `app/cli/testdata/golden/` holds the exact shapes the tests enforce.
+Run `status` is `ready` (no attempts yet), `passed`, `failed`, or `error`, from the latest attempt. In a git repository, the run has a `baseline` (the commit it started at). Rules with evidence have an `evidence` list with each item's `kind`, `path` or `paths`, `size`, `sha256`, and, when they apply, `baseline`, `files` (diffs), `absent`, `truncated`, and `error`. `results` keep the contract's rule order. `app/cli/testdata/golden/` holds the exact shapes the tests enforce.
 
 ## Exit codes
 

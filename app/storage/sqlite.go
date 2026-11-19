@@ -15,6 +15,10 @@ import (
 
 type SQLite struct{ db *sql.DB }
 
+// SchemaVersion is the database layout this build creates and reads.
+// Version 2 added run baselines and the evidence blob store.
+const SchemaVersion = 2
+
 var _ backend.RunRepository = (*SQLite)(nil)
 
 func Open(path string) (*SQLite, error) {
@@ -61,10 +65,18 @@ func (s *SQLite) initialize() error {
 	if err := s.db.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
 		return err
 	}
-	if version > 1 {
-		return fmt.Errorf("unsupported database schema version %d", version)
+	if version > SchemaVersion {
+		return fmt.Errorf("unsupported database schema version %d (this harness supports up to %d); upgrade harness", version, SchemaVersion)
 	}
-	_, err := s.db.Exec(`
+	if version == SchemaVersion {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	_, err = tx.Exec(`
 CREATE TABLE IF NOT EXISTS drafts (id TEXT PRIMARY KEY, payload TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS versions (
  contract_id TEXT NOT NULL REFERENCES drafts(id), version INTEGER NOT NULL,
@@ -72,6 +84,7 @@ CREATE TABLE IF NOT EXISTS versions (
 CREATE TABLE IF NOT EXISTS runs (
  id TEXT PRIMARY KEY, contract_id TEXT NOT NULL, version INTEGER NOT NULL,
  project_dir TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL,
+ baseline TEXT NOT NULL DEFAULT '',
  FOREIGN KEY(contract_id, version) REFERENCES versions(contract_id, version));
 CREATE TABLE IF NOT EXISTS attempts (
  run_id TEXT NOT NULL REFERENCES runs(id), number INTEGER NOT NULL,
@@ -86,9 +99,24 @@ CREATE TRIGGER IF NOT EXISTS versions_no_update BEFORE UPDATE ON versions
 BEGIN SELECT RAISE(ABORT, 'published versions are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS versions_no_delete BEFORE DELETE ON versions
 BEGIN SELECT RAISE(ABORT, 'published versions are immutable'); END;
-PRAGMA user_version = 1;
+CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, data BLOB NOT NULL);
+CREATE TRIGGER IF NOT EXISTS blobs_no_update BEFORE UPDATE ON blobs
+BEGIN SELECT RAISE(ABORT, 'evidence is immutable'); END;
 `)
-	return err
+	if err != nil {
+		return err
+	}
+	if version == 1 {
+		// Version 1 runs had no baseline; CREATE TABLE IF NOT EXISTS above
+		// left the existing table as it was.
+		if _, err := tx.Exec("ALTER TABLE runs ADD COLUMN baseline TEXT NOT NULL DEFAULT ''"); err != nil {
+			return fmt.Errorf("upgrade schema to version 2: %w", err)
+		}
+	}
+	if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 func notFound(err error) error {
 	if errors.Is(err, sql.ErrNoRows) {
@@ -186,12 +214,12 @@ func (s *SQLite) ListVersions(id string) ([]backend.PublishedContract, error) {
 	return result, rows.Err()
 }
 func (s *SQLite) CreateRun(r backend.Run) error {
-	_, err := s.db.Exec("INSERT INTO runs(id,contract_id,version,project_dir,status,created_at) VALUES(?,?,?,?,?,?)", r.ID, r.ContractID, r.Version, r.ProjectDir, r.Status, r.CreatedAt.Format(time.RFC3339Nano))
+	_, err := s.db.Exec("INSERT INTO runs(id,contract_id,version,project_dir,baseline,status,created_at) VALUES(?,?,?,?,?,?,?)", r.ID, r.ContractID, r.Version, r.ProjectDir, r.Baseline, r.Status, r.CreatedAt.Format(time.RFC3339Nano))
 	return err
 }
 func scanRun(row interface{ Scan(...any) error }) (r backend.Run, err error) {
 	var created string
-	err = row.Scan(&r.ID, &r.ContractID, &r.Version, &r.ProjectDir, &r.Status, &created)
+	err = row.Scan(&r.ID, &r.ContractID, &r.Version, &r.ProjectDir, &r.Baseline, &r.Status, &created)
 	if err != nil {
 		return r, notFound(err)
 	}
@@ -202,7 +230,7 @@ func scanRun(row interface{ Scan(...any) error }) (r backend.Run, err error) {
 func (s *SQLite) GetRun(id string) (backend.Run, error) {
 	run := backend.Run{Attempts: []backend.Attempt{}}
 	// Read status and history in one statement so concurrent appends cannot mix snapshots.
-	rows, err := s.db.Query(`SELECT r.id,r.contract_id,r.version,r.project_dir,r.status,r.created_at,
+	rows, err := s.db.Query(`SELECT r.id,r.contract_id,r.version,r.project_dir,r.baseline,r.status,r.created_at,
 a.number,a.started_at,a.completed_at,a.status,rr.payload
 FROM runs r LEFT JOIN attempts a ON r.id=a.run_id
 LEFT JOIN rule_results rr ON a.run_id=rr.run_id AND a.number=rr.attempt_number
@@ -217,7 +245,7 @@ WHERE r.id=? ORDER BY a.number,rr.position`, id)
 		var number sql.NullInt64
 		var created string
 		var started, completed, status, payload sql.NullString
-		if err := rows.Scan(&run.ID, &run.ContractID, &run.Version, &run.ProjectDir, &run.Status, &created, &number, &started, &completed, &status, &payload); err != nil {
+		if err := rows.Scan(&run.ID, &run.ContractID, &run.Version, &run.ProjectDir, &run.Baseline, &run.Status, &created, &number, &started, &completed, &status, &payload); err != nil {
 			return run, err
 		}
 		run.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
@@ -256,7 +284,7 @@ WHERE r.id=? ORDER BY a.number,rr.position`, id)
 	return run, nil
 }
 func (s *SQLite) ListRuns() ([]backend.Run, error) {
-	rows, err := s.db.Query("SELECT id,contract_id,version,project_dir,status,created_at FROM runs ORDER BY created_at DESC,id")
+	rows, err := s.db.Query("SELECT id,contract_id,version,project_dir,baseline,status,created_at FROM runs ORDER BY created_at DESC,id")
 	if err != nil {
 		return nil, err
 	}
@@ -288,6 +316,11 @@ func (s *SQLite) AppendAttempt(id string, attempt backend.Attempt) (backend.Run,
 	if _, err := tx.Exec("INSERT INTO attempts(run_id,number,started_at,completed_at,status) VALUES(?,?,?,?,?)", id, number, attempt.StartedAt.Format(time.RFC3339Nano), attempt.CompletedAt.Format(time.RFC3339Nano), attempt.Status); err != nil {
 		return backend.Run{}, err
 	}
+	for hash, data := range attempt.Blobs {
+		if _, err := tx.Exec("INSERT OR IGNORE INTO blobs(hash,data) VALUES(?,?)", hash, data); err != nil {
+			return backend.Run{}, err
+		}
+	}
 	for position, result := range attempt.Results {
 		payload, err := json.Marshal(result)
 		if err != nil {
@@ -304,4 +337,13 @@ func (s *SQLite) AppendAttempt(id string, attempt backend.Attempt) (backend.Run,
 		return backend.Run{}, err
 	}
 	return s.GetRun(id)
+}
+
+// GetBlob returns stored evidence content.
+func (s *SQLite) GetBlob(hash string) ([]byte, error) {
+	var data []byte
+	if err := s.db.QueryRow("SELECT data FROM blobs WHERE hash=?", hash).Scan(&data); err != nil {
+		return nil, notFound(err)
+	}
+	return data, nil
 }
