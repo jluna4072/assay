@@ -34,15 +34,18 @@ type fileRule struct {
 	Criterion string         `yaml:"criterion"`
 	Check     string         `yaml:"check"`
 	Path      string         `yaml:"path"`
+	Command   string         `yaml:"command"`
 	DependsOn []string       `yaml:"depends_on"`
 	Evidence  []fileEvidence `yaml:"evidence"`
 }
 
 // fileEvidence is one item of a rule's evidence list: exactly one of
-// "file: <path>" or "diff: {paths: [...]}" ("diff: {}" for the whole project).
+// "file: <path>", "diff: {paths: [...]}" ("diff: {}" for the whole
+// project), or "command: <name>".
 type fileEvidence struct {
-	File *string   `yaml:"file,omitempty"`
-	Diff *fileDiff `yaml:"diff,omitempty,flow"`
+	File    *string   `yaml:"file,omitempty"`
+	Diff    *fileDiff `yaml:"diff,omitempty,flow"`
+	Command *string   `yaml:"command,omitempty"`
 }
 
 type fileDiff struct {
@@ -77,6 +80,9 @@ type Result struct {
 	Path     string
 	Contract backend.Contract
 	Problems []Problem
+
+	root        *yaml.Node   // for locating later validation problems
+	decodeLines map[int]bool // lines that already have a decoding problem
 }
 
 func (r Result) Valid() bool { return len(r.Problems) == 0 }
@@ -174,30 +180,47 @@ func Parse(data []byte) Result {
 	for i, rule := range file.Rules {
 		result.Contract.Rules[i] = backend.Rule{
 			ID: rule.ID, Criterion: rule.Criterion, Kind: backend.RuleKind(rule.Check),
-			Path: rule.Path, DependsOn: rule.DependsOn,
+			Path: rule.Path, Command: rule.Command, DependsOn: rule.DependsOn,
 		}
 		for j, item := range rule.Evidence {
+			set := 0
+			for _, present := range []bool{item.File != nil, item.Diff != nil, item.Command != nil} {
+				if present {
+					set++
+				}
+			}
 			switch {
-			case item.File != nil && item.Diff == nil:
+			case set == 1 && item.File != nil:
 				result.Contract.Rules[i].Evidence = append(result.Contract.Rules[i].Evidence, backend.EvidenceSpec{Kind: backend.FileEvidence, Path: *item.File})
-			case item.Diff != nil && item.File == nil:
+			case set == 1 && item.Diff != nil:
 				result.Contract.Rules[i].Evidence = append(result.Contract.Rules[i].Evidence, backend.EvidenceSpec{Kind: backend.DiffEvidence, Paths: item.Diff.Paths})
+			case set == 1 && item.Command != nil:
+				result.Contract.Rules[i].Evidence = append(result.Contract.Rules[i].Evidence, backend.EvidenceSpec{Kind: backend.CommandEvidence, Command: *item.Command})
 			default:
 				line, column := evidencePosition(root, i, j)
 				if !decodeLines[line] {
-					add(Problem{Line: line, Column: column, RuleID: rule.ID, Message: "each evidence item needs exactly one of file: <path> or diff: {} (diff: {paths: [...]} limits it)"})
+					add(Problem{Line: line, Column: column, RuleID: rule.ID, Message: "each evidence item needs exactly one of file: <path>, diff: {} (diff: {paths: [...]} limits it), or command: <name>"})
 				}
 			}
 		}
 	}
-	for _, v := range backend.ValidationErrors(backend.ValidateContract(result.Contract)) {
-		line, column := position(root, v.Rule, v.Field)
-		if decodeLines[line] {
+	result.root = root
+	result.decodeLines = decodeLines
+	result.AddValidation(backend.ValidateContract(result.Contract))
+	return result
+}
+
+// AddValidation adds backend validation errors (such as from
+// backend.ValidateCommands) to the result, located in the file.
+func (r *Result) AddValidation(err error) {
+	for _, v := range backend.ValidationErrors(err) {
+		line, column := position(r.root, v.Rule, v.Field)
+		if r.decodeLines[line] {
 			continue
 		}
-		add(Problem{Line: line, Column: column, RuleID: v.RuleID, Message: v.Message})
+		r.Problems = append(r.Problems, Problem{Line: line, Column: column, RuleID: v.RuleID, Message: v.Message})
 	}
-	return sorted(result)
+	*r = sorted(*r)
 }
 
 func sorted(result Result) Result {
@@ -288,8 +311,11 @@ var (
 	wrongType    = regexp.MustCompile("^cannot unmarshal !!(\\w+)(?: `[^`]*`)? into (\\S+)$")
 )
 
-// yamlProblem turns a YAML library message into a Problem with a line number
-// and wording that names YAML concepts rather than Go types.
+// YAMLProblem turns a YAML library error into a Problem with a line number
+// and wording that names YAML concepts rather than Go types. Other files
+// harness reads strictly (such as .harness/config.yaml) use it too.
+func YAMLProblem(err error) Problem { return yamlProblem(err) }
+
 func yamlProblem(err error) Problem {
 	message := strings.TrimPrefix(err.Error(), "yaml: ")
 	problem := Problem{Message: message}
@@ -347,7 +373,7 @@ func Marshal(contract backend.Contract) ([]byte, error) {
 		Rules   []marshalledRule `yaml:"rules"`
 	}{Version: version, ID: contract.ID, Name: contract.Name, Rules: make([]marshalledRule, len(contract.Rules))}
 	for i, rule := range contract.Rules {
-		file.Rules[i] = marshalledRule{ID: rule.ID, Criterion: rule.Criterion, Check: string(rule.Kind), Path: rule.Path, DependsOn: rule.DependsOn}
+		file.Rules[i] = marshalledRule{ID: rule.ID, Criterion: rule.Criterion, Check: string(rule.Kind), Path: rule.Path, Command: rule.Command, DependsOn: rule.DependsOn}
 		for _, spec := range rule.Evidence {
 			switch spec.Kind {
 			case backend.FileEvidence:
@@ -355,6 +381,9 @@ func Marshal(contract backend.Contract) ([]byte, error) {
 				file.Rules[i].Evidence = append(file.Rules[i].Evidence, fileEvidence{File: &path})
 			case backend.DiffEvidence:
 				file.Rules[i].Evidence = append(file.Rules[i].Evidence, fileEvidence{Diff: &fileDiff{Paths: spec.Paths}})
+			case backend.CommandEvidence:
+				command := spec.Command
+				file.Rules[i].Evidence = append(file.Rules[i].Evidence, fileEvidence{Command: &command})
 			}
 		}
 	}
@@ -374,7 +403,8 @@ type marshalledRule struct {
 	ID        string         `yaml:"id"`
 	Criterion string         `yaml:"criterion"`
 	Check     string         `yaml:"check"`
-	Path      string         `yaml:"path"`
+	Path      string         `yaml:"path,omitempty"`
+	Command   string         `yaml:"command,omitempty"`
 	DependsOn []string       `yaml:"depends_on,omitempty,flow"`
 	Evidence  []fileEvidence `yaml:"evidence,omitempty"`
 }

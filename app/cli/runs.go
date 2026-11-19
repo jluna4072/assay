@@ -123,6 +123,12 @@ type evidenceJSON struct {
 	Baseline  string   `json:"baseline,omitempty"`
 	Files     int      `json:"files,omitempty"`
 	Absent    bool     `json:"absent,omitempty"`
+	Command   string   `json:"command,omitempty"`
+	Argv      []string `json:"argv,omitempty"`
+	ExitCode  *int     `json:"exitCode,omitempty"`   // commands that ran
+	Duration  *int64   `json:"durationMs,omitempty"` // commands that ran
+	TimedOut  bool     `json:"timedOut,omitempty"`
+	Sandboxed *bool    `json:"sandboxed,omitempty"` // commands that ran
 	Size      int64    `json:"size"`
 	SHA256    string   `json:"sha256,omitempty"`
 	Truncated bool     `json:"truncated,omitempty"`
@@ -130,10 +136,16 @@ type evidenceJSON struct {
 }
 
 func toEvidenceJSON(item backend.Evidence) evidenceJSON {
-	return evidenceJSON{
+	out := evidenceJSON{
 		Kind: string(item.Kind), Path: item.Path, Paths: item.Paths, Baseline: item.Baseline, Files: item.Files,
-		Absent: item.Absent, Size: item.Size, SHA256: item.SHA256, Truncated: item.Truncated, Error: item.Error,
+		Absent: item.Absent, Command: item.Command, Argv: item.Argv, TimedOut: item.TimedOut,
+		Size: item.Size, SHA256: item.SHA256, Truncated: item.Truncated, Error: item.Error,
 	}
+	if item.Kind == backend.CommandEvidence && item.Error == "" {
+		exitCode, duration, sandboxed := item.ExitCode, item.Duration, item.Sandboxed
+		out.ExitCode, out.Duration, out.Sandboxed = &exitCode, &duration, &sandboxed
+	}
+	return out
 }
 
 func toRunJSON(run backend.Run) runJSON {
@@ -284,6 +296,8 @@ func describeEvidence(item backend.Evidence) string {
 		if len(item.Paths) > 0 {
 			subject += " of " + strings.Join(item.Paths, ", ")
 		}
+	case backend.CommandEvidence:
+		subject = "command " + item.Command
 	default:
 		subject = string(item.Kind)
 	}
@@ -294,8 +308,18 @@ func describeEvidence(item backend.Evidence) string {
 		return subject + " · absent"
 	}
 	detail := formatSize(item.Size)
-	if item.Kind == backend.DiffEvidence {
+	switch item.Kind {
+	case backend.DiffEvidence:
 		detail = plural(item.Files, "file") + " changed, " + detail
+	case backend.CommandEvidence:
+		status := fmt.Sprintf("exit %d", item.ExitCode)
+		if item.TimedOut {
+			status = "timed out"
+		}
+		detail = fmt.Sprintf("%s in %s, %s output", status, formatDuration(item.Duration), detail)
+		if !item.Sandboxed {
+			detail += ", unsandboxed"
+		}
 	}
 	if item.Truncated {
 		detail += fmt.Sprintf(", first %s stored", formatSize(backend.MaxEvidenceBytes))
@@ -313,6 +337,13 @@ func shortCommit(hash string) string {
 		return "(no baseline)"
 	}
 	return hash
+}
+
+func formatDuration(ms int64) string {
+	if ms < 1000 {
+		return fmt.Sprintf("%dms", ms)
+	}
+	return (time.Duration(ms) * time.Millisecond).Round(100 * time.Millisecond).String()
 }
 
 func formatSize(n int64) string {

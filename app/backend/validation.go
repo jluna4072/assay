@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -48,6 +49,32 @@ func ValidationErrors(err error) []*ValidationError {
 	return result
 }
 
+var commandNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
+
+// CommandName reports whether name is a valid approved-command name.
+func CommandName(name string) bool { return commandNamePattern.MatchString(name) }
+
+// ValidateCommands checks that every command a contract runs is approved
+// in config. It reports problems like ValidateContract.
+func ValidateCommands(contract Contract, config Config) error {
+	var problems []error
+	for i, rule := range contract.Rules {
+		if rule.Kind == CommandSucceeds && CommandName(rule.Command) {
+			if _, ok := config.Commands[rule.Command]; !ok {
+				problems = append(problems, &ValidationError{Rule: i, RuleID: rule.ID, Field: "command", Message: fmt.Sprintf("command %q isn't approved in .harness/config.yaml", rule.Command)})
+			}
+		}
+		for _, spec := range rule.Evidence {
+			if spec.Kind == CommandEvidence && CommandName(spec.Command) {
+				if _, ok := config.Commands[spec.Command]; !ok {
+					problems = append(problems, &ValidationError{Rule: i, RuleID: rule.ID, Field: "evidence", Message: fmt.Sprintf("command %q isn't approved in .harness/config.yaml", spec.Command)})
+				}
+			}
+		}
+	}
+	return errors.Join(problems...)
+}
+
 // projectPath reports whether path is a usable project-relative path.
 func projectPath(path string) bool {
 	return strings.TrimSpace(path) != "" && filepath.IsLocal(path) && !strings.Contains(path, "\\")
@@ -83,11 +110,23 @@ func ValidateContract(contract Contract) error {
 		if strings.TrimSpace(rule.Criterion) == "" {
 			report(i, rule.ID, "criterion", "acceptance criterion is required")
 		}
-		if rule.Kind != FileExists {
+		switch rule.Kind {
+		case FileExists:
+			if !projectPath(rule.Path) {
+				report(i, rule.ID, "path", "path must be a relative path inside the project")
+			}
+			if rule.Command != "" {
+				report(i, rule.ID, "command", "command is only used by command_succeeds")
+			}
+		case CommandSucceeds:
+			if !CommandName(rule.Command) {
+				report(i, rule.ID, "command", "command_succeeds needs the name of an approved command (letters, digits, '.', '_', '-')")
+			}
+			if rule.Path != "" {
+				report(i, rule.ID, "path", "path isn't used by command_succeeds")
+			}
+		default:
 			report(i, rule.ID, "check", "unsupported check %q", rule.Kind)
-		}
-		if !projectPath(rule.Path) {
-			report(i, rule.ID, "path", "path must be a relative path inside the project")
 		}
 		for _, spec := range rule.Evidence {
 			switch spec.Kind {
@@ -100,6 +139,10 @@ func ValidateContract(contract Contract) error {
 					if !projectPath(path) {
 						report(i, rule.ID, "evidence", "diff evidence path %q must be a relative path inside the project", path)
 					}
+				}
+			case CommandEvidence:
+				if !CommandName(spec.Command) {
+					report(i, rule.ID, "evidence", "command evidence %q isn't a valid command name", spec.Command)
 				}
 			default:
 				report(i, rule.ID, "evidence", "unsupported evidence %q", spec.Kind)

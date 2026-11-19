@@ -32,6 +32,9 @@ type Repository interface {
 type Service struct {
 	store Repository
 	mu    sync.Mutex
+	// LoadConfig reads a project's local config when an attempt runs an
+	// approved command. Without it, no commands are approved.
+	LoadConfig func(projectDir string) (Config, error)
 }
 
 func NewService(store Repository) *Service { return &Service{store: store} }
@@ -104,9 +107,9 @@ func SameContent(a, b Contract) bool {
 	}
 	for i := range a.Rules {
 		x, y := a.Rules[i], b.Rules[i]
-		if x.ID != y.ID || x.Criterion != y.Criterion || x.Kind != y.Kind || x.Path != y.Path || !slices.Equal(x.DependsOn, y.DependsOn) ||
+		if x.ID != y.ID || x.Criterion != y.Criterion || x.Kind != y.Kind || x.Path != y.Path || x.Command != y.Command || !slices.Equal(x.DependsOn, y.DependsOn) ||
 			!slices.EqualFunc(x.Evidence, y.Evidence, func(a, b EvidenceSpec) bool {
-				return a.Kind == b.Kind && a.Path == b.Path && slices.Equal(a.Paths, b.Paths)
+				return a.Kind == b.Kind && a.Path == b.Path && a.Command == b.Command && slices.Equal(a.Paths, b.Paths)
 			}) {
 			return false
 		}

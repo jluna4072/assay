@@ -33,7 +33,7 @@ func TestInitIsIdempotentAndIgnoresState(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("node_modules"), 0644)
 
 	out := mustRun(t, dir, "init")
-	for _, want := range []string{"created  .harness/harness.db", "created  harness/example.yaml", "added    /.harness/ to .gitignore", "Next: harness contract validate harness/example.yaml"} {
+	for _, want := range []string{"created  .harness/harness.db", "created  .harness/config.yaml", "created  harness/example.yaml", "added    /.harness/ to .gitignore", "Next: harness contract validate harness/example.yaml"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("first init output lacks %q:\n%s", want, out)
 		}
@@ -69,7 +69,7 @@ func TestInitOutsideGitAndWithExistingContracts(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil || code != ExitOK {
 		t.Fatalf("exit %d: %v\n%s", code, err, stdout)
 	}
-	if got.Gitignore != "not a git repository" || len(got.Created) != 1 || got.Existing[0] != "harness/" {
+	if got.Gitignore != "not a git repository" || len(got.Created) != 2 || got.Created[1] != ".harness/config.yaml" || got.Existing[0] != "harness/" {
 		t.Fatalf("unexpected: %+v", got)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".gitignore")); !os.IsNotExist(err) {

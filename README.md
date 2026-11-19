@@ -54,7 +54,7 @@ Backend details: [contract publication](docs/contracts.md) and [persistent runs]
 
 ## Scope
 
-Current checks support regular-file existence and dependencies between rules. Rules can record file contents and git diffs as evidence with each attempt. Command evidence, model reviewers, workers, automatic repairs, MCP access, and releases are future work.
+Rules can check that a file exists or that an approved command succeeds, with dependencies between them. Each attempt can record file contents, git diffs, and command output as evidence; commands run under the macOS sandbox. Model reviewers, workers, automatic repairs, MCP access, and releases are future work.
 
 ## Roadmap
 
