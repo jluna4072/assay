@@ -126,6 +126,40 @@ Prints a published version in the contract file format, so it can be diffed or s
 
 An unknown contract or version is a usage error (exit 64). All three contract commands accept `--json` and `--project <dir>`.
 
+### `harness contract graph <id>[@version] | <file>`
+
+Draws the rules and their dependencies, starting from the rules nothing else depends on, with each rule's dependencies beneath it. A rule reached a second time is drawn once and then marked `(see above)`. An argument containing `/` or ending in `.yaml`/`.yml` is read as a contract file, so a draft can be drawn before it's published.
+
+```
+$ harness contract graph harness/release.yaml
+harness/release.yaml (Release readiness, unpublished)
+notes — Release notes say "ready"
+├── guide — Guide exists
+│   └── readme — Project has a README
+└── changelog — Changelog exists
+    ├── readme — Project has a README
+    └── license — Project has a LICENSE
+```
+
+`--run <run>` marks each rule with its result in that run's latest attempt and shows the reason for anything that didn't pass:
+
+```
+$ harness contract graph release --run wjweu7
+release@1 (Release readiness) · run wjweu7, attempt 1
+⊘ notes — blocked: dependency guide did not pass
+├── ✗ guide — docs/guide.md does not exist
+│   └── ✓ readme — Project has a README
+└── ⊘ changelog — blocked: dependency license did not pass
+    ├── ✓ readme — Project has a README
+    └── ✗ license — LICENSE does not exist
+```
+
+`--format mermaid` prints a Mermaid flowchart (GitHub renders these in Markdown), and `--format dot` prints a Graphviz digraph; both color rules by result with `--run`. `--json` prints the rules, their dependencies, the roots, and (with `--run`) each rule's status and reason.
+
+```sh
+harness contract graph release --run wjweu7 --format dot | dot -Tsvg > release.svg
+```
+
 ### `harness check <id>[@version]`
 
 Starts a run of a published version against the project and records attempt 1. The run stays tied to that version even after newer versions are published.

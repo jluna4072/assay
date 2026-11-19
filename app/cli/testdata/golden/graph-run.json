@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "contract": "release",
+  "name": "Release readiness",
+  "version": 1,
+  "run": {
+    "id": "RUN_ID",
+    "attempt": 1
+  },
+  "roots": [
+    "notes"
+  ],
+  "rules": [
+    {
+      "id": "readme",
+      "criterion": "Project has a README",
+      "dependsOn": [],
+      "status": "passed"
+    },
+    {
+      "id": "license",
+      "criterion": "Project has a LICENSE",
+      "dependsOn": [],
+      "status": "failed",
+      "reason": "LICENSE does not exist"
+    },
+    {
+      "id": "guide",
+      "criterion": "Guide exists",
+      "dependsOn": [
+        "readme"
+      ],
+      "status": "failed",
+      "reason": "docs/guide.md does not exist"
+    },
+    {
+      "id": "changelog",
+      "criterion": "Changelog exists",
+      "dependsOn": [
+        "readme",
+        "license"
+      ],
+      "status": "blocked",
+      "reason": "dependency license did not pass"
+    },
+    {
+      "id": "notes",
+      "criterion": "Release notes say \"ready\"",
+      "dependsOn": [
+        "guide",
+        "changelog"
+      ],
+      "status": "blocked",
+      "reason": "dependency guide did not pass"
+    }
+  ]
+}

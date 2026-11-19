@@ -1,0 +1,26 @@
+id: release
+name: Release readiness
+rules:
+  - id: readme
+    criterion: Project has a README
+    check: file_exists
+    path: README.md
+  - id: license
+    criterion: Project has a LICENSE
+    check: file_exists
+    path: LICENSE
+  - id: guide
+    criterion: Guide exists
+    check: file_exists
+    path: docs/guide.md
+    depends_on: [readme]
+  - id: changelog
+    criterion: Changelog exists
+    check: file_exists
+    path: CHANGELOG.md
+    depends_on: [readme, license]
+  - id: notes
+    criterion: Release notes say "ready"
+    check: file_exists
+    path: docs/notes.md
+    depends_on: [guide, changelog]

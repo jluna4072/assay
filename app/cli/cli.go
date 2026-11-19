@@ -62,6 +62,7 @@ var commands = []command{
 	publishCommand,
 	versionsCommand,
 	showCommand,
+	graphCommand,
 	checkCommand,
 	recheckCommand,
 	runsCommand,
