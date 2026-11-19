@@ -43,7 +43,7 @@ type contractSummaryJSON struct {
 	Rules int    `json:"rules"`
 }
 
-func runValidate(e env, cmd *command, args []string) int {
+func runValidate(e Env, cmd *command, args []string) int {
 	fs := flag.NewFlagSet("contract validate", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "")
 	files, code, ok := parseFlags(e, cmd, fs, args)
@@ -51,7 +51,7 @@ func runValidate(e env, cmd *command, args []string) int {
 		return code
 	}
 	if len(files) == 0 {
-		fmt.Fprintln(e.stderr, "harness contract validate: name at least one contract file")
+		fmt.Fprintln(e.Stderr, "harness contract validate: name at least one contract file")
 		return ExitUsage
 	}
 
@@ -81,7 +81,7 @@ func runValidate(e env, cmd *command, args []string) int {
 	}
 
 	if *asJSON {
-		writeJSON(e.stdout, struct {
+		writeJSON(e.Stdout, struct {
 			Schema int                `json:"schema"`
 			Valid  bool               `json:"valid"`
 			Files  []validateFileJSON `json:"files"`
@@ -92,14 +92,11 @@ func runValidate(e env, cmd *command, args []string) int {
 	for _, report := range reports {
 		switch {
 		case report.Error != "":
-			fmt.Fprintf(e.stderr, "harness: %s\n", report.Error)
+			fmt.Fprintf(e.Stderr, "harness: %s\n", report.Error)
 		case report.Valid:
-			fmt.Fprintf(e.stdout, "✓ %s: %s, %s\n", report.Path, report.Contract.ID, plural(report.Contract.Rules, "rule"))
+			fmt.Fprintf(e.Stdout, "✓ %s: %s, %s\n", report.Path, report.Contract.ID, plural(report.Contract.Rules, "rule"))
 		default:
-			fmt.Fprintf(e.stdout, "✗ %s: %s\n", report.Path, plural(len(report.Problems), "problem"))
-			for _, problem := range report.Problems {
-				fmt.Fprintf(e.stdout, "  %s:%s\n", report.Path, problem)
-			}
+			printProblems(e, report.Path, report.Problems)
 		}
 	}
 	if len(files) > 1 {
@@ -107,7 +104,7 @@ func runValidate(e env, cmd *command, args []string) int {
 		if unreadable > 0 {
 			summary += fmt.Sprintf(", %d unreadable", unreadable)
 		}
-		fmt.Fprintln(e.stdout, summary)
+		fmt.Fprintln(e.Stdout, summary)
 	}
 	return exit
 }
@@ -117,4 +114,12 @@ func plural(n int, noun string) string {
 		return fmt.Sprintf("1 %s", noun)
 	}
 	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+// printProblems lists a contract file's problems as path:line: message.
+func printProblems(e Env, path string, problems []contractfile.Problem) {
+	fmt.Fprintf(e.Stdout, "✗ %s: %s\n", path, plural(len(problems), "problem"))
+	for _, problem := range problems {
+		fmt.Fprintf(e.Stdout, "  %s:%s\n", path, problem)
+	}
 }

@@ -9,7 +9,7 @@ import (
 
 func run(args ...string) (stdout, stderr string, code int) {
 	var out, errOut bytes.Buffer
-	code = Run(args, &out, &errOut)
+	code = Run(args, Env{Stdout: &out, Stderr: &errOut, Dir: "."})
 	return out.String(), errOut.String(), code
 }
 

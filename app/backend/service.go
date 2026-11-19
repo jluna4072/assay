@@ -3,6 +3,7 @@ package backend
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -70,4 +71,42 @@ func (s *Service) ListVersions(id string) ([]PublishedContract, error) {
 
 func (s *Service) GetVersion(id string, version int) (PublishedContract, error) {
 	return s.store.GetVersion(id, version)
+}
+
+// PublishContent validates a complete contract (for example, one read from a
+// file) and publishes it as the next version. If it matches the latest
+// published version, nothing is written and changed is false.
+func (s *Service) PublishContent(contract Contract) (published PublishedContract, changed bool, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := ValidateContract(contract); err != nil {
+		return PublishedContract{}, false, err
+	}
+	versions, err := s.store.ListVersions(contract.ID)
+	if err != nil {
+		return PublishedContract{}, false, err
+	}
+	if n := len(versions); n > 0 && SameContent(versions[n-1].Contract, contract) {
+		return versions[n-1], false, nil
+	}
+	if err := s.store.SaveDraft(contract); err != nil {
+		return PublishedContract{}, false, err
+	}
+	published, err = s.store.CreateVersion(contract, time.Now().UTC())
+	return published, err == nil, err
+}
+
+// SameContent reports whether two contracts would be checked identically.
+// An empty dependency list and a missing one are the same.
+func SameContent(a, b Contract) bool {
+	if a.ID != b.ID || a.Name != b.Name || len(a.Rules) != len(b.Rules) {
+		return false
+	}
+	for i := range a.Rules {
+		x, y := a.Rules[i], b.Rules[i]
+		if x.ID != y.ID || x.Criterion != y.Criterion || x.Kind != y.Kind || x.Path != y.Path || !slices.Equal(x.DependsOn, y.DependsOn) {
+			return false
+		}
+	}
+	return true
 }
