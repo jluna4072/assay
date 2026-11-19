@@ -126,13 +126,112 @@ Prints a published version in the contract file format, so it can be diffed or s
 
 An unknown contract or version is a usage error (exit 64). All three contract commands accept `--json` and `--project <dir>`.
 
+### `harness check <id>[@version]`
+
+Starts a run of a published version against the project and records attempt 1. The run stays tied to that version even after newer versions are published.
+
+```
+$ harness check docs
+docs@1 · run ijyvmk · attempt 1 · FAILED
+
+  ✗ readme   README.md does not exist
+  ⊘ guide    blocked: dependency readme did not pass
+
+1 failed, 1 blocked · fix, then: harness recheck ijyvmk
+```
+
+Each rule ends in one of four states. Rules needing attention are listed first.
+
+| Mark | Status | Meaning |
+|---|---|---|
+| ✓ | `passed` | The check succeeded |
+| ✗ | `failed` | The check ran and the rule isn't met |
+| ⊘ | `blocked` | A rule it depends on didn't pass, so it wasn't checked |
+| ! | `error` | The check couldn't run (for example, a path escapes the project) |
+
+### `harness recheck [run]`
+
+Adds an attempt to a run after you've changed the project. Earlier attempts are kept. Without a run ID it uses the most recent run.
+
+### `harness runs`
+
+Lists runs, newest first. `--contract <id>` filters by contract; `--limit <n>` shows at most n (default 20, `0` for all).
+
+```
+$ harness runs
+RUN     CONTRACT  STATUS  ATTEMPTS  STARTED
+ijyvmk  docs@1    passed  3         2026-11-19 09:49
+```
+
+### `harness show [run]`
+
+Prints every attempt of a run, oldest first, with each rule's reason. Without a run ID it shows the most recent run; `--attempt <n>` shows one attempt.
+
+```
+$ harness show
+run ijyvmk · docs@1 · /Users/me/my-project
+started 2026-11-19 09:49 · passed on attempt 3
+
+attempt 1 · failed · 2026-11-19 09:49:58
+  ✗ readme   README.md does not exist
+  ⊘ guide    blocked: dependency readme did not pass
+
+attempt 2 · failed · 2026-11-19 09:50:31
+  ✗ guide    docs/guide.md does not exist
+  ✓ readme
+
+attempt 3 · passed · 2026-11-19 09:51:02
+  ✓ readme
+  ✓ guide
+```
+
+### Run IDs
+
+Runs are shown by the first six characters of their ID. Anywhere a run ID is accepted, any unique prefix works, in either case. An ambiguous prefix lists the matching runs and exits 64.
+
+### Run JSON
+
+`check`, `recheck`, and `show` accept `--json` and print the run in this shape (`check` and `recheck` add `"attempt"`, the number of the attempt just recorded):
+
+```json
+{
+  "schema": 1,
+  "attempt": 1,
+  "run": {
+    "id": "ijyvmkq3ccxnmkoq7u3bbomxnb",
+    "shortId": "ijyvmk",
+    "contract": "docs",
+    "version": 1,
+    "projectDir": "/Users/me/my-project",
+    "status": "failed",
+    "createdAt": "2026-11-19T16:49:58.976127Z",
+    "attempts": [
+      {
+        "number": 1,
+        "status": "failed",
+        "startedAt": "2026-11-19T16:49:58.976634Z",
+        "completedAt": "2026-11-19T16:49:58.976687Z",
+        "results": [
+          { "rule": "readme", "status": "failed", "reason": "README.md does not exist" },
+          { "rule": "guide", "status": "blocked", "reason": "dependency readme did not pass" }
+        ]
+      }
+    ]
+  }
+}
+```
+
+Run `status` is `ready` (no attempts yet), `passed`, `failed`, or `error`, from the latest attempt. `results` keep the contract's rule order. `app/cli/testdata/golden/` holds the exact shapes the tests enforce.
+
 ## Exit codes
 
 | Code | Meaning |
 |---|---|
-| 0 | Success |
-| 1 | Negative verdict: a contract is invalid (later: a rule failed) |
-| 2 | Operational error: a file or the database couldn't be read |
-| 64 | Usage error: unknown command, bad flag, missing argument, no project found, unknown contract or version, publish without confirmation |
+| 0 | Success; for `check` and `recheck`, every rule passed |
+| 1 | Negative verdict: a contract is invalid, or a rule failed or was blocked |
+| 2 | Operational error: a file or the database couldn't be read, or a check couldn't run |
+| 64 | Usage error: unknown command, bad flag, missing argument, no project found, unknown contract, version, or run, publish without confirmation |
+
+Exit codes make `harness check` usable as a gate in scripts and CI: `harness check docs && deploy`.
 
 Flags may come before or after file names. Use `--` to pass a file name that starts with `-`.

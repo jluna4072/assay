@@ -34,6 +34,8 @@ func TestBinaryExitCodes(t *testing.T) {
 		{[]string{"contract", "publish", good}, 64},
 		{[]string{"contract", "publish", good, "--yes"}, 0},
 		{[]string{"contract", "show", "a@1"}, 0},
+		{[]string{"check", "a"}, 1}, // no README.md yet
+		{[]string{"runs"}, 0},
 	} {
 		command := exec.Command(binary, tc.args...)
 		command.Dir = dir
@@ -48,5 +50,12 @@ func TestBinaryExitCodes(t *testing.T) {
 		if code != tc.code {
 			t.Errorf("%v: exit %d, want %d", tc.args, code, tc.code)
 		}
+	}
+
+	os.WriteFile(filepath.Join(dir, "README.md"), nil, 0644)
+	recheck := exec.Command(binary, "recheck")
+	recheck.Dir = dir
+	if out, err := recheck.CombinedOutput(); err != nil {
+		t.Errorf("recheck after the fix: %v\n%s", err, out)
 	}
 }

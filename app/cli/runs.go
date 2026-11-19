@@ -1,0 +1,502 @@
+package cli
+
+import (
+	"flag"
+	"fmt"
+	"io"
+	"sort"
+	"strings"
+	"text/tabwriter"
+	"time"
+
+	"harness/backend"
+)
+
+const shortIDLength = 6
+
+var checkCommand = command{
+	name:    "check",
+	args:    "<id>[@version]",
+	summary: "Start a run of a published contract and check the project",
+	details: `
+Starts a run of a published contract against this project and records the
+first attempt. Without @version, uses the latest version. The run stays tied
+to that version even after newer versions are published.
+
+Flags:
+  --json            Print one JSON object instead of text
+` + projectFlagHelp + `
+
+Exit codes: 0 every rule passed, 1 a rule failed or was blocked, 2 a check
+couldn't run, 64 usage error or unknown contract.
+`,
+	run: runCheck,
+}
+
+var recheckCommand = command{
+	name:    "recheck",
+	args:    "[run]",
+	summary: "Check the project again, adding an attempt to a run",
+	details: `
+Records a new attempt for an existing run, using the run's published
+version. Earlier attempts are kept. Without a run ID, uses the most recent
+run. A run ID can be shortened to any unique prefix.
+
+Flags:
+  --json            Print one JSON object instead of text
+` + projectFlagHelp + `
+
+Exit codes: as for check.
+`,
+	run: runRecheck,
+}
+
+var runsCommand = command{
+	name:    "runs",
+	args:    "",
+	summary: "List runs, newest first",
+	details: `
+Lists this project's runs, newest first.
+
+Flags:
+  --contract <id>   Only runs of this contract
+  --limit <n>       Show at most n runs (default 20, 0 for all)
+  --json            Print one JSON object instead of text
+` + projectFlagHelp + `
+`,
+	run: runRuns,
+}
+
+var showRunCommand = command{
+	name:    "show",
+	args:    "[run]",
+	summary: "Show a run's attempts and why each rule passed or failed",
+	details: `
+Prints every attempt of a run, oldest first, with each rule's result and
+reason. Without a run ID, shows the most recent run. A run ID can be
+shortened to any unique prefix.
+
+Flags:
+  --attempt <n>     Only attempt n
+  --json            Print one JSON object instead of text
+` + projectFlagHelp + `
+`,
+	run: runShowRun,
+}
+
+// JSON shapes for runs. These are the documented --json output, separate
+// from the backend's storage types so either can change independently.
+type runJSON struct {
+	ID         string        `json:"id"`
+	ShortID    string        `json:"shortId"`
+	Contract   string        `json:"contract"`
+	Version    int           `json:"version"`
+	ProjectDir string        `json:"projectDir"`
+	Status     string        `json:"status"`
+	CreatedAt  time.Time     `json:"createdAt"`
+	Attempts   []attemptJSON `json:"attempts"`
+}
+
+type attemptJSON struct {
+	Number      int          `json:"number"`
+	Status      string       `json:"status"`
+	StartedAt   time.Time    `json:"startedAt"`
+	CompletedAt time.Time    `json:"completedAt"`
+	Results     []resultJSON `json:"results"`
+}
+
+type resultJSON struct {
+	Rule   string `json:"rule"`
+	Status string `json:"status"`
+	Reason string `json:"reason,omitempty"`
+}
+
+func toRunJSON(run backend.Run) runJSON {
+	out := runJSON{
+		ID: strings.ToLower(run.ID), ShortID: shortID(run.ID), Contract: run.ContractID, Version: run.Version,
+		ProjectDir: run.ProjectDir, Status: run.Status, CreatedAt: run.CreatedAt, Attempts: []attemptJSON{},
+	}
+	for _, a := range run.Attempts {
+		attempt := attemptJSON{Number: a.Number, Status: string(a.Status), StartedAt: a.StartedAt, CompletedAt: a.CompletedAt, Results: []resultJSON{}}
+		for _, r := range a.Results {
+			attempt.Results = append(attempt.Results, resultJSON{Rule: r.RuleID, Status: string(r.Status), Reason: r.Reason})
+		}
+		out.Attempts = append(out.Attempts, attempt)
+	}
+	return out
+}
+
+func shortID(id string) string {
+	if len(id) > shortIDLength {
+		id = id[:shortIDLength]
+	}
+	return strings.ToLower(id)
+}
+
+// listRuns returns runs newest first. Storage orders by its timestamp text,
+// which isn't strictly chronological within a second, so sort by time here.
+func listRuns(s *session) ([]backend.Run, error) {
+	runs, err := s.service.ListRuns()
+	if err != nil {
+		return nil, err
+	}
+	sort.SliceStable(runs, func(i, j int) bool { return runs[i].CreatedAt.After(runs[j].CreatedAt) })
+	return runs, nil
+}
+
+// findRun resolves a run ID prefix (case-insensitive), or the most recent run
+// when prefix is empty. Failures are reported and returned as exit codes.
+func findRun(e Env, cmd *command, s *session, prefix string) (backend.Run, int) {
+	runs, err := listRuns(s)
+	if err != nil {
+		fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)
+		return backend.Run{}, ExitOperational
+	}
+	if len(runs) == 0 {
+		fmt.Fprintf(e.Stderr, "harness %s: no runs yet. Start one with \"harness check <contract>\".\n", cmd.name)
+		return backend.Run{}, ExitUsage
+	}
+	var matches []backend.Run
+	if prefix == "" {
+		matches = runs[:1]
+	} else {
+		for _, run := range runs {
+			if strings.HasPrefix(strings.ToUpper(run.ID), strings.ToUpper(prefix)) {
+				matches = append(matches, run)
+			}
+		}
+	}
+	switch len(matches) {
+	case 0:
+		fmt.Fprintf(e.Stderr, "harness %s: no run matches %q. List runs with \"harness runs\".\n", cmd.name, prefix)
+		return backend.Run{}, ExitUsage
+	case 1:
+		run, err := s.service.GetRun(matches[0].ID)
+		if err != nil {
+			fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)
+			return backend.Run{}, ExitOperational
+		}
+		return run, ExitOK
+	default:
+		fmt.Fprintf(e.Stderr, "harness %s: %q matches %d runs; use more characters:\n", cmd.name, prefix, len(matches))
+		for _, run := range matches {
+			fmt.Fprintf(e.Stderr, "  %s  %s@%d  %s\n", strings.ToLower(run.ID), run.ContractID, run.Version, run.CreatedAt.Local().Format("2006-01-02 15:04"))
+		}
+		return backend.Run{}, ExitUsage
+	}
+}
+
+// attemptExit maps an attempt's status to the process exit code.
+func attemptExit(status backend.ResultStatus) int {
+	switch status {
+	case backend.Passed:
+		return ExitOK
+	case backend.OperationalError:
+		return ExitOperational
+	default:
+		return ExitNegative
+	}
+}
+
+var statusMarks = map[backend.ResultStatus]string{
+	backend.Passed:           "✓",
+	backend.Failed:           "✗",
+	backend.Blocked:          "⊘",
+	backend.OperationalError: "!",
+}
+
+// severity orders results so the ones needing attention come first.
+var severity = map[backend.ResultStatus]int{
+	backend.OperationalError: 0,
+	backend.Failed:           1,
+	backend.Blocked:          2,
+	backend.Passed:           3,
+}
+
+// printResults lists an attempt's rule results, most severe first.
+func printResults(w io.Writer, attempt backend.Attempt) {
+	results := append([]backend.RuleResult(nil), attempt.Results...)
+	sort.SliceStable(results, func(i, j int) bool { return severity[results[i].Status] < severity[results[j].Status] })
+	width := 0
+	for _, r := range results {
+		width = max(width, len(r.RuleID))
+	}
+	for _, r := range results {
+		mark := statusMarks[r.Status]
+		if mark == "" {
+			mark = "?"
+		}
+		reason := r.Reason
+		if r.Status == backend.Blocked {
+			reason = "blocked: " + reason
+		}
+		if reason == "" {
+			fmt.Fprintf(w, "  %s %s\n", mark, r.RuleID)
+		} else {
+			fmt.Fprintf(w, "  %s %-*s   %s\n", mark, width, r.RuleID, reason)
+		}
+	}
+}
+
+// printAttempt prints the newest attempt of a run with a summary line.
+func printAttempt(w io.Writer, run backend.Run) {
+	attempt := run.Attempts[len(run.Attempts)-1]
+	fmt.Fprintf(w, "%s@%d · run %s · attempt %d · %s\n\n", run.ContractID, run.Version, shortID(run.ID), attempt.Number, strings.ToUpper(string(attempt.Status)))
+	printResults(w, attempt)
+	counts := map[backend.ResultStatus]int{}
+	for _, r := range attempt.Results {
+		counts[r.Status]++
+	}
+	fmt.Fprintln(w)
+	if attempt.Status == backend.Passed {
+		fmt.Fprintf(w, "all %s passed\n", plural(len(attempt.Results), "rule"))
+		return
+	}
+	var parts []string
+	if n := counts[backend.OperationalError]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d couldn't be checked", n))
+	}
+	if n := counts[backend.Failed]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d failed", n))
+	}
+	if n := counts[backend.Blocked]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d blocked", n))
+	}
+	if n := counts[backend.Passed]; n > 0 {
+		parts = append(parts, fmt.Sprintf("%d passed", n))
+	}
+	fmt.Fprintf(w, "%s · fix, then: harness recheck %s\n", strings.Join(parts, ", "), shortID(run.ID))
+}
+
+func runCheck(e Env, cmd *command, args []string) int {
+	fs := flag.NewFlagSet(cmd.name, flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "")
+	projectDir := fs.String("project", "", "")
+	refs, code, ok := parseFlags(e, cmd, fs, args)
+	if !ok {
+		return code
+	}
+	if len(refs) != 1 {
+		fmt.Fprintln(e.Stderr, "harness check: name exactly one contract, like docs or docs@2")
+		return ExitUsage
+	}
+	id, version, err := parseRef(refs[0])
+	if err != nil {
+		fmt.Fprintf(e.Stderr, "harness check: %v\n", err)
+		return ExitUsage
+	}
+	s, code := openProject(e, cmd, *projectDir)
+	if s == nil {
+		return code
+	}
+	defer s.Close()
+
+	published, _, code := lookupVersion(e, cmd, s, id, version)
+	if code != ExitOK {
+		return code
+	}
+	run, err := s.service.StartRun(id, published.Version, s.project.Root)
+	if err != nil {
+		fmt.Fprintf(e.Stderr, "harness check: %v\n", err)
+		return ExitOperational
+	}
+	return evaluate(e, cmd, s, run, *asJSON)
+}
+
+func runRecheck(e Env, cmd *command, args []string) int {
+	fs := flag.NewFlagSet(cmd.name, flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "")
+	projectDir := fs.String("project", "", "")
+	ids, code, ok := parseFlags(e, cmd, fs, args)
+	if !ok {
+		return code
+	}
+	if len(ids) > 1 {
+		fmt.Fprintln(e.Stderr, "harness recheck: name at most one run")
+		return ExitUsage
+	}
+	s, code := openProject(e, cmd, *projectDir)
+	if s == nil {
+		return code
+	}
+	defer s.Close()
+
+	prefix := ""
+	if len(ids) == 1 {
+		prefix = ids[0]
+	}
+	run, code := findRun(e, cmd, s, prefix)
+	if code != ExitOK {
+		return code
+	}
+	return evaluate(e, cmd, s, run, *asJSON)
+}
+
+// evaluate records a new attempt for run and prints it.
+func evaluate(e Env, cmd *command, s *session, run backend.Run, asJSON bool) int {
+	run, err := s.service.EvaluateAttempt(run.ID)
+	if err != nil {
+		fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)
+		return ExitOperational
+	}
+	attempt := run.Attempts[len(run.Attempts)-1]
+	if asJSON {
+		writeJSON(e.Stdout, struct {
+			Schema  int     `json:"schema"`
+			Attempt int     `json:"attempt"`
+			Run     runJSON `json:"run"`
+		}{JSONSchema, attempt.Number, toRunJSON(run)})
+	} else {
+		printAttempt(e.Stdout, run)
+	}
+	return attemptExit(attempt.Status)
+}
+
+type runSummaryJSON struct {
+	ID        string    `json:"id"`
+	ShortID   string    `json:"shortId"`
+	Contract  string    `json:"contract"`
+	Version   int       `json:"version"`
+	Status    string    `json:"status"`
+	Attempts  int       `json:"attempts"`
+	CreatedAt time.Time `json:"createdAt"`
+}
+
+func runRuns(e Env, cmd *command, args []string) int {
+	fs := flag.NewFlagSet(cmd.name, flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "")
+	projectDir := fs.String("project", "", "")
+	contract := fs.String("contract", "", "")
+	limit := fs.Int("limit", 20, "")
+	rest, code, ok := parseFlags(e, cmd, fs, args)
+	if !ok {
+		return code
+	}
+	if len(rest) > 0 {
+		fmt.Fprintf(e.Stderr, "harness runs: unexpected argument %q\n", rest[0])
+		return ExitUsage
+	}
+	if *limit < 0 {
+		fmt.Fprintln(e.Stderr, "harness runs: --limit must be 0 or more")
+		return ExitUsage
+	}
+	s, code := openProject(e, cmd, *projectDir)
+	if s == nil {
+		return code
+	}
+	defer s.Close()
+
+	all, err := listRuns(s)
+	if err != nil {
+		fmt.Fprintf(e.Stderr, "harness runs: %v\n", err)
+		return ExitOperational
+	}
+	summaries := []runSummaryJSON{}
+	for _, run := range all {
+		if *contract != "" && run.ContractID != *contract {
+			continue
+		}
+		if *limit > 0 && len(summaries) == *limit {
+			break
+		}
+		full, err := s.service.GetRun(run.ID)
+		if err != nil {
+			fmt.Fprintf(e.Stderr, "harness runs: %v\n", err)
+			return ExitOperational
+		}
+		summaries = append(summaries, runSummaryJSON{
+			ID: strings.ToLower(run.ID), ShortID: shortID(run.ID), Contract: run.ContractID, Version: run.Version,
+			Status: full.Status, Attempts: len(full.Attempts), CreatedAt: run.CreatedAt,
+		})
+	}
+	if *asJSON {
+		writeJSON(e.Stdout, struct {
+			Schema int              `json:"schema"`
+			Runs   []runSummaryJSON `json:"runs"`
+		}{JSONSchema, summaries})
+		return ExitOK
+	}
+	if len(summaries) == 0 {
+		fmt.Fprintln(e.Stdout, "no runs yet. Start one with \"harness check <contract>\".")
+		return ExitOK
+	}
+	table := tabwriter.NewWriter(e.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(table, "RUN\tCONTRACT\tSTATUS\tATTEMPTS\tSTARTED")
+	for _, r := range summaries {
+		fmt.Fprintf(table, "%s\t%s@%d\t%s\t%d\t%s\n", r.ShortID, r.Contract, r.Version, r.Status, r.Attempts, r.CreatedAt.Local().Format("2006-01-02 15:04"))
+	}
+	table.Flush()
+	return ExitOK
+}
+
+func runShowRun(e Env, cmd *command, args []string) int {
+	fs := flag.NewFlagSet(cmd.name, flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "")
+	projectDir := fs.String("project", "", "")
+	only := fs.Int("attempt", 0, "")
+	ids, code, ok := parseFlags(e, cmd, fs, args)
+	if !ok {
+		return code
+	}
+	if len(ids) > 1 {
+		fmt.Fprintln(e.Stderr, "harness show: name at most one run")
+		return ExitUsage
+	}
+	if *only < 0 {
+		fmt.Fprintln(e.Stderr, "harness show: --attempt must be a positive number")
+		return ExitUsage
+	}
+	s, code := openProject(e, cmd, *projectDir)
+	if s == nil {
+		return code
+	}
+	defer s.Close()
+
+	prefix := ""
+	if len(ids) == 1 {
+		prefix = ids[0]
+	}
+	run, code := findRun(e, cmd, s, prefix)
+	if code != ExitOK {
+		return code
+	}
+	attempts := run.Attempts
+	if *only > 0 {
+		if *only > len(run.Attempts) {
+			fmt.Fprintf(e.Stderr, "harness show: run %s has %s\n", shortID(run.ID), plural(len(run.Attempts), "attempt"))
+			return ExitUsage
+		}
+		attempts = run.Attempts[*only-1 : *only]
+	}
+	if *asJSON {
+		filtered := run
+		filtered.Attempts = attempts
+		writeJSON(e.Stdout, struct {
+			Schema int     `json:"schema"`
+			Run    runJSON `json:"run"`
+		}{JSONSchema, toRunJSON(filtered)})
+		return ExitOK
+	}
+
+	fmt.Fprintf(e.Stdout, "run %s · %s@%d · %s\n", shortID(run.ID), run.ContractID, run.Version, run.ProjectDir)
+	fmt.Fprintf(e.Stdout, "started %s · %s\n", run.CreatedAt.Local().Format("2006-01-02 15:04"), runStatusLine(run))
+	for _, attempt := range attempts {
+		fmt.Fprintf(e.Stdout, "\nattempt %d · %s · %s\n", attempt.Number, attempt.Status, attempt.StartedAt.Local().Format("2006-01-02 15:04:05"))
+		printResults(e.Stdout, attempt)
+	}
+	return ExitOK
+}
+
+func runStatusLine(run backend.Run) string {
+	n := len(run.Attempts)
+	if n == 0 {
+		return "no attempts yet"
+	}
+	if run.Status == string(backend.Passed) {
+		if n == 1 {
+			return "passed on the first attempt"
+		}
+		return fmt.Sprintf("passed on attempt %d", n)
+	}
+	return fmt.Sprintf("%s after %s", run.Status, plural(n, "attempt"))
+}
