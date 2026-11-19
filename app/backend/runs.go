@@ -128,7 +128,8 @@ func (s *Service) EvaluateAttempt(runID string) (Run, error) {
 		return Run{}, err
 	}
 	attempt := Attempt{StartedAt: time.Now().UTC(), Status: Passed}
-	evidence := newCollector(run.ProjectDir, run.Baseline)
+	evidence := newCollector(run.ProjectDir, run.Baseline, s.LoadConfig)
+	defer evidence.cleanup()
 	rules := make(map[string]Rule)
 	for _, rule := range published.Contract.Rules {
 		rules[rule.ID] = rule
@@ -147,14 +148,27 @@ func (s *Service) EvaluateAttempt(runID string) (Run, error) {
 				return result
 			}
 		}
-		result, err := CheckFileExists(run.ProjectDir, rule)
-		if err != nil {
-			result.Status = OperationalError
-			result.Reason = err.Error()
+		var result RuleResult
+		switch rule.Kind {
+		case CommandSucceeds:
+			item := evidence.command(rule.Command)
+			result = RuleResult{RuleID: rule.ID, Evidence: []Evidence{item}}
+			result.Status, result.Reason = commandVerdict(rule, item)
+			result.Passed = result.Status == Passed
+		default:
+			var err error
+			result, err = CheckFileExists(run.ProjectDir, rule)
+			if err != nil {
+				result.Status = OperationalError
+				result.Reason = err.Error()
+			}
 		}
 		// Evidence is collected with the check, from the same project state.
 		// A rule can't pass if any of its evidence couldn't be collected.
 		for _, spec := range rule.Evidence {
+			if rule.Kind == CommandSucceeds && spec.Kind == CommandEvidence && spec.Command == rule.Command {
+				continue // already recorded as the check itself
+			}
 			item := evidence.collect(spec)
 			result.Evidence = append(result.Evidence, item)
 			if item.Error != "" && result.Status == Passed {

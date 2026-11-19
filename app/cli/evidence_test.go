@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"harness/backend"
 )
 
 const evidenceContract = `id: docs
@@ -134,5 +136,60 @@ func TestEvidenceErrors(t *testing.T) {
 	runIn(plain, false, "check", "docs")
 	if _, stderr, code := runIn(plain, false, "evidence", "readme"); code != ExitNegative || !strings.Contains(stderr, "its contract asks for none") {
 		t.Fatalf("no evidence configured: exit %d %s", code, stderr)
+	}
+}
+
+func TestCommandRulesThroughTheCLI(t *testing.T) {
+	if err := backend.SandboxAvailable(); err != nil {
+		t.Skipf("sandbox unavailable: %v", err)
+	}
+	dir := t.TempDir()
+	mustRun(t, dir, "init")
+	contract := filepath.Join(dir, "harness", "ci.yaml")
+	os.WriteFile(contract, []byte(`id: ci
+name: CI
+rules:
+  - id: flag
+    criterion: The flag file says yes
+    check: command_succeeds
+    command: check-flag
+`), 0644)
+
+	// Not approved yet: validate and publish both refuse.
+	stdout, _, code := runIn(dir, false, "contract", "validate", contract)
+	if code != ExitNegative || !strings.Contains(stdout, `command "check-flag" isn't approved in .harness/config.yaml`) {
+		t.Fatalf("validate unapproved: exit %d\n%s", code, stdout)
+	}
+	if _, _, code := runIn(dir, false, "contract", "publish", contract, "--yes"); code != ExitNegative {
+		t.Fatalf("publish unapproved: exit %d", code)
+	}
+
+	config, _ := os.ReadFile(filepath.Join(dir, ".harness", "config.yaml"))
+	config = []byte(strings.Replace(string(config), "commands: {}", "commands:\n  check-flag:\n    run: [/bin/sh, -c, 'cat flag.txt; grep -q yes flag.txt']", 1))
+	os.WriteFile(filepath.Join(dir, ".harness", "config.yaml"), config, 0600)
+	mustRun(t, dir, "contract", "validate", contract)
+	mustRun(t, dir, "contract", "publish", contract, "--yes")
+
+	os.WriteFile(filepath.Join(dir, "flag.txt"), []byte("no\n"), 0644)
+	stdout, _, code = runIn(dir, false, "check", "ci")
+	if code != ExitNegative || !strings.Contains(stdout, "✗ flag   check-flag exited with status 1") {
+		t.Fatalf("check: exit %d\n%s", code, stdout)
+	}
+	os.WriteFile(filepath.Join(dir, "flag.txt"), []byte("yes\n"), 0644)
+	mustRun(t, dir, "recheck")
+
+	show := mustRun(t, dir, "show", "--evidence")
+	if !regexp.MustCompile(`\[1\] command check-flag · exit 1 in \d+ms, 3 B output · sha256 [0-9a-f]{12}`).MatchString(show) ||
+		!regexp.MustCompile(`\[1\] command check-flag · exit 0 in \d+ms, 4 B output`).MatchString(show) {
+		t.Fatalf("show --evidence:\n%s", show)
+	}
+	if out := mustRun(t, dir, "evidence", "flag", "--attempt", "1", "--item", "1"); out != "no\n" {
+		t.Fatalf("command output: %q", out)
+	}
+	json := mustRun(t, dir, "show", "--json")
+	for _, want := range []string{`"kind": "command"`, `"command": "check-flag"`, `"exitCode": 1`, `"exitCode": 0`, `"sandboxed": true`, `"argv": [`} {
+		if !strings.Contains(json, want) {
+			t.Errorf("show --json lacks %s", want)
+		}
 	}
 }

@@ -172,19 +172,62 @@ func TestEvidence(t *testing.T) {
       - diff:
       - {file: a, diff: {}}
       - file: ../outside
-      - command: go-test
+      - command: "go test"
+      - shell: ls
 `))
 	got := make([]string, len(bad.Problems))
 	for i, p := range bad.Problems {
 		got[i] = p.String()
 	}
+	both := "each evidence item needs exactly one of file: <path>, diff: {} (diff: {paths: [...]} limits it), or command: <name>"
 	wantProblems := []string{
 		`14:5: rule "guide": file evidence path "../outside" must be a relative path inside the project`,
-		`15:9: rule "guide": each evidence item needs exactly one of file: <path> or diff: {} (diff: {paths: [...]} limits it)`,
-		`16:9: rule "guide": each evidence item needs exactly one of file: <path> or diff: {} (diff: {paths: [...]} limits it)`,
-		`18: unknown key "command"`,
+		`14:5: rule "guide": command evidence "go test" isn't a valid command name`,
+		`15:9: rule "guide": ` + both,
+		`16:9: rule "guide": ` + both,
+		`19: unknown key "shell"`,
 	}
 	if !reflect.DeepEqual(got, wantProblems) {
 		t.Fatalf("problems:\n got  %q\n want %q", got, wantProblems)
+	}
+}
+
+func TestCommandRules(t *testing.T) {
+	src := `version: 1
+id: ci
+name: CI
+rules:
+  - id: tests
+    criterion: Tests pass
+    check: command_succeeds
+    command: go-test
+    evidence:
+      - command: go-vet
+`
+	result := Parse([]byte(src))
+	if !result.Valid() {
+		t.Fatalf("problems: %v", result.Problems)
+	}
+	rule := result.Contract.Rules[0]
+	if rule.Kind != backend.CommandSucceeds || rule.Command != "go-test" || !reflect.DeepEqual(rule.Evidence[0], backend.EvidenceSpec{Kind: backend.CommandEvidence, Command: "go-vet"}) {
+		t.Fatalf("rule: %+v", rule)
+	}
+	if data, _ := Marshal(result.Contract); string(data) != src {
+		t.Fatalf("round trip:\n%s", data)
+	}
+
+	// Commands are checked against a project's config separately.
+	result.AddValidation(backend.ValidateCommands(result.Contract, backend.Config{Commands: map[string]backend.CommandSpec{"go-vet": {}}}))
+	if len(result.Problems) != 1 || result.Problems[0].String() != `8:5: rule "tests": command "go-test" isn't approved in .harness/config.yaml` {
+		t.Fatalf("unapproved command: %v", result.Problems)
+	}
+
+	bad := Parse([]byte(strings.Replace(src, "command: go-test", "command: go-test\n    path: x.txt", 1)))
+	if len(bad.Problems) != 1 || !strings.Contains(bad.Problems[0].Message, "path isn't used by command_succeeds") {
+		t.Fatalf("path on a command rule: %v", bad.Problems)
+	}
+	bad = Parse([]byte(strings.Replace(src, "command: go-test", "command: \"\"", 1)))
+	if len(bad.Problems) != 1 || !strings.Contains(bad.Problems[0].Message, "needs the name of an approved command") {
+		t.Fatalf("missing command: %v", bad.Problems)
 	}
 }

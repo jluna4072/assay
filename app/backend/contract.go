@@ -16,13 +16,20 @@ type RuleResult struct {
 
 type RuleKind string
 
-const FileExists RuleKind = "file_exists"
+const (
+	// FileExists passes when Path is a regular file in the project.
+	FileExists RuleKind = "file_exists"
+	// CommandSucceeds passes when the approved command named by Command
+	// exits with status 0.
+	CommandSucceeds RuleKind = "command_succeeds"
+)
 
 type Rule struct {
 	ID        string         `json:"id"`
 	Criterion string         `json:"criterion"`
 	Kind      RuleKind       `json:"kind"`
 	Path      string         `json:"path"`
+	Command   string         `json:"command,omitempty"`
 	DependsOn []string       `json:"dependsOn"`
 	Evidence  []EvidenceSpec `json:"evidence,omitempty"`
 }

@@ -4,7 +4,9 @@ import (
 	"flag"
 	"fmt"
 
+	"harness/backend"
 	"harness/contractfile"
+	"harness/project"
 )
 
 var validateCommand = command{
@@ -15,7 +17,9 @@ var validateCommand = command{
 Reads each YAML contract file and reports every problem that would stop it
 from being published: unknown or duplicate keys, wrong types, missing fields,
 unsupported checks, paths outside the project, unknown or duplicate
-dependencies, and dependency cycles. Nothing is saved.
+dependencies, and dependency cycles. Inside a harness project, it also checks
+that every command the contract runs is approved in .harness/config.yaml.
+Nothing is saved.
 
 Flags:
   --json   Print one JSON object instead of text
@@ -58,9 +62,24 @@ func runValidate(e Env, cmd *command, args []string) int {
 	exit := ExitOK
 	valid, invalid, unreadable := 0, 0, 0
 	reports := make([]validateFileJSON, 0, len(files))
+	// Inside a project, also check that commands are approved in its config.
+	var config *backend.Config
+	var configErr error
+	if p, err := project.Find(e.Dir); err == nil {
+		loaded, err := project.LoadConfig(p.Root)
+		config, configErr = &loaded, err
+	}
 	for _, path := range files {
 		report := validateFileJSON{Path: path, Problems: []contractfile.Problem{}}
-		result, err := contractfile.Check(path)
+		result, err := contractfile.Check(resolve(e, path))
+		if err == nil && result.Valid() && usesCommands(result.Contract) {
+			switch {
+			case configErr != nil:
+				err = configErr
+			case config != nil:
+				result.AddValidation(backend.ValidateCommands(result.Contract, *config))
+			}
+		}
 		switch {
 		case err != nil:
 			report.Error = err.Error()
@@ -122,4 +141,18 @@ func printProblems(e Env, path string, problems []contractfile.Problem) {
 	for _, problem := range problems {
 		fmt.Fprintf(e.Stdout, "  %s:%s\n", path, problem)
 	}
+}
+
+func usesCommands(contract backend.Contract) bool {
+	for _, rule := range contract.Rules {
+		if rule.Kind == backend.CommandSucceeds {
+			return true
+		}
+		for _, spec := range rule.Evidence {
+			if spec.Kind == backend.CommandEvidence {
+				return true
+			}
+		}
+	}
+	return false
 }

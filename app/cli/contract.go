@@ -10,6 +10,7 @@ import (
 
 	"harness/backend"
 	"harness/contractfile"
+	"harness/project"
 )
 
 var publishCommand = command{
@@ -101,6 +102,14 @@ func runPublish(e Env, cmd *command, args []string) int {
 	if err != nil {
 		fmt.Fprintf(e.Stderr, "harness contract publish: %v\n", err)
 		return ExitOperational
+	}
+	if result.Valid() {
+		config, err := project.LoadConfig(s.project.Root)
+		if err != nil {
+			fmt.Fprintf(e.Stderr, "harness contract publish: %v\n", err)
+			return ExitOperational
+		}
+		result.AddValidation(backend.ValidateCommands(result.Contract, config))
 	}
 	if !result.Valid() {
 		if *asJSON {

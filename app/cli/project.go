@@ -34,10 +34,11 @@ var initCommand = command{
 	args:    "[dir]",
 	summary: "Create a harness project in dir (default: the working directory)",
 	details: `
-Creates .harness/ (local state: the database of published contracts and runs)
-and harness/ (contract files you commit), with an example contract. Inside a
-git repository, adds .harness/ to .gitignore. Running it again changes
-nothing that already exists.
+Creates .harness/ (local state: the database of published contracts and runs,
+and config.yaml, where you approve commands contracts may run) and harness/
+(contract files you commit), with an example contract. Inside a git
+repository, adds .harness/ to .gitignore. Running it again changes nothing
+that already exists.
 
 Flags:
   --json   Print one JSON object instead of text
@@ -77,7 +78,9 @@ func openProject(e Env, cmd *command, dir string) (*session, int) {
 		fmt.Fprintf(e.Stderr, "harness %s: open %s: %v\n", cmd.name, p.DatabasePath(), err)
 		return nil, ExitOperational
 	}
-	return &session{project: p, store: store, service: backend.NewService(store)}, ExitOK
+	service := backend.NewService(store)
+	service.LoadConfig = project.LoadConfig
+	return &session{project: p, store: store, service: service}, ExitOK
 }
 
 // resolve interprets a command-line path relative to the working directory.
@@ -144,6 +147,16 @@ func runInit(e Env, cmd *command, args []string) int {
 	}
 	store.Close()
 	note(dbRel, statErr == nil)
+
+	configRel := filepath.Join(project.StateDir, project.ConfigFile)
+	if _, err := os.Stat(p.ConfigPath()); err == nil {
+		note(configRel, true)
+	} else {
+		if err := os.WriteFile(p.ConfigPath(), []byte(project.ConfigTemplate), 0600); err != nil {
+			return fail(err)
+		}
+		note(configRel, false)
+	}
 
 	contractsRel := project.ContractsDir + string(filepath.Separator)
 	exampleRel := filepath.Join(project.ContractsDir, project.ExampleFile)

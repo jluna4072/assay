@@ -15,8 +15,8 @@ var evidenceCommand = command{
 	args:    "[run] <rule>",
 	summary: "Print the evidence recorded for a rule",
 	details: `
-Prints what harness recorded for a rule when it checked it: file contents
-and diffs, exactly as they were at that attempt. Later changes to the
+Prints what harness recorded for a rule when it checked it: file contents,
+diffs, and command output, exactly as they were at that attempt. Later changes to the
 project don't change recorded evidence. Without a run ID, uses the most
 recent run; without --attempt, the latest attempt.
 

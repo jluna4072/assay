@@ -43,8 +43,9 @@ rules:
 | `id`, `name` | Contract identifier and display name |
 | `rules[].id` | Unique rule identifier |
 | `rules[].criterion` | The acceptance criterion in plain words |
-| `rules[].check` | How the rule is checked; `file_exists` is the only check so far |
-| `rules[].path` | Project-relative path for `file_exists` |
+| `rules[].check` | How the rule is checked: `file_exists` or `command_succeeds` |
+| `rules[].path` | Project-relative path, for `file_exists` |
+| `rules[].command` | Name of an approved command, for `command_succeeds`: the rule passes when it exits with status 0 |
 | `rules[].depends_on` | Rules that must pass before this one is checked |
 | `rules[].evidence` | What harness records when it checks the rule (below) |
 
@@ -68,12 +69,58 @@ A rule can ask harness to record evidence each time it's checked, so every decis
 | `file: <path>` | The file's contents, or that it was absent |
 | `diff: {}` | `git diff` from the commit the project was at when the run started to the files as they are now, including staged, unstaged, and untracked files (not ignored ones, and never `.harness/`). The project's own git index isn't touched. |
 | `diff: {paths: [...]}` | The same, limited to those paths |
+| `command: <name>` | An approved command's combined output, exit status, and duration. A `command_succeeds` rule records its own command automatically. |
 
 Evidence is collected together with the check, from the same project state, and stored in `.harness/harness.db`, so later edits never change what an earlier attempt recorded. Each item is capped at 1 MiB; larger content is stored up to the cap and marked truncated, with its full size and SHA-256 recorded. Evidence is collected for failed rules too, but not for blocked ones, which aren't checked.
+
+Each command runs at most once per attempt, however many rules ask for it.
 
 **Missing evidence can't produce a pass.** If an item can't be collected (a path is a directory, a symlink leads outside the project, or diff evidence is requested in a project that isn't a git repository), a rule that would have passed is marked `error` instead. An absent file isn't a collection failure: "the file didn't exist" is recorded as the evidence.
 
 Decoding is strict. Unknown keys (such as a misspelled `depend_on`), duplicate keys, wrong types, and a second YAML document in the same file are reported as problems instead of being ignored.
+
+## Approved commands
+
+Contracts can't run arbitrary commands. They name commands you approve in `.harness/config.yaml`, which `harness init` creates. The file lives in `.harness/`, so it isn't committed, and agents and contract authors can't change what a name runs.
+
+```yaml
+version: 1
+sandbox: on
+commands:
+  go-test:
+    run: [go, test, ./...]   # program and arguments; no shell
+    dir: app                 # where to run it, relative to the project (default: the root)
+    timeout: 5m              # default 5m, at most 1h; a timeout fails the rule
+    network: off             # off (default), localhost, or on
+    writes: scratch          # scratch (default) or project
+    env: [GOFLAGS]           # variables passed through from your environment
+    caches: [GOCACHE]        # variables pointed at .harness/cache/go-test/<NAME>
+```
+
+```yaml
+  - id: tests
+    criterion: The test suite passes
+    check: command_succeeds
+    command: go-test
+```
+
+`contract validate` (inside a project) and `contract publish` reject contracts that name commands the config doesn't approve.
+
+### The sandbox
+
+On macOS, approved commands run under the system sandbox (`sandbox-exec`). For a command and everything it starts:
+
+- **No network** unless the command allows `localhost` (connecting to and listening on local ports) or `on`.
+- **Writes only to a scratch directory** (`TMPDIR`, emptied after each attempt) and the command's declared caches (kept between attempts). With `writes: project` it may also write anywhere in the project, but never in `.harness/`.
+- **No reading** `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.docker`, `~/.config/gh`, `~/.netrc`, the keychains, or harness's database.
+- **A cleared environment**: `PATH`, `HOME`, `LANG`, `TMPDIR`, `XDG_CACHE_HOME`, plus the variables in `env` and `caches`. Nothing else from your environment is passed.
+- **A timeout** that stops the command and every process it started.
+
+Toolchains that write caches outside the project need them declared. For Go, `caches: [GOCACHE]`; downloaded modules in `~/go/pkg/mod` are readable, but new downloads need `network: on`.
+
+If the sandbox isn't available (on Linux, for example), commands can't run and their rules report `error`. `sandbox: off` runs them without it; their evidence is then marked unsandboxed (`unsandboxed` in `show --evidence`, `"sandboxed": false` in JSON).
+
+A command with `writes: project` changes the project for rules checked after it in the same attempt. Prefer scratch writes; see `docs/spikes/command-sandbox.md` for how the sandbox was tested.
 
 ## Commands
 
@@ -111,7 +158,7 @@ $ harness contract validate harness/docs.yaml
 
 ### `harness init [dir]`
 
-Creates `.harness/harness.db` and `harness/example.yaml` (unless `harness/` already holds contract files). Inside a git repository it adds `/.harness/` to `.gitignore`. Running it again changes nothing that already exists.
+Creates `.harness/harness.db`, `.harness/config.yaml` (approved commands; see above), and `harness/example.yaml` (unless `harness/` already holds contract files). Inside a git repository it adds `/.harness/` to `.gitignore`. Running it again changes nothing that already exists.
 
 ```
 $ harness init
@@ -313,7 +360,7 @@ Runs are shown by the first six characters of their ID. Anywhere a run ID is acc
 }
 ```
 
-Run `status` is `ready` (no attempts yet), `passed`, `failed`, or `error`, from the latest attempt. In a git repository, the run has a `baseline` (the commit it started at). Rules with evidence have an `evidence` list with each item's `kind`, `path` or `paths`, `size`, `sha256`, and, when they apply, `baseline`, `files` (diffs), `absent`, `truncated`, and `error`. `results` keep the contract's rule order. `app/cli/testdata/golden/` holds the exact shapes the tests enforce.
+Run `status` is `ready` (no attempts yet), `passed`, `failed`, or `error`, from the latest attempt. In a git repository, the run has a `baseline` (the commit it started at). Rules with evidence have an `evidence` list with each item's `kind`, `path` or `paths`, `size`, `sha256`, and, when they apply, `baseline`, `files` (diffs), `absent`, `truncated`, and `error`. Command items add `command`, `argv`, `exitCode`, `durationMs`, `sandboxed`, and `timedOut`. `results` keep the contract's rule order. `app/cli/testdata/golden/` holds the exact shapes the tests enforce.
 
 ## Exit codes
 

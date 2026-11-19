@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -25,6 +26,8 @@ const (
 	// DiffEvidence captures the changes since the run's baseline commit,
 	// including untracked files.
 	DiffEvidence EvidenceKind = "diff"
+	// CommandEvidence captures an approved command's output and exit status.
+	CommandEvidence EvidenceKind = "command"
 )
 
 // MaxEvidenceBytes caps the stored content of one evidence item. Larger
@@ -38,9 +41,10 @@ const EmptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 // EvidenceSpec is what a rule asks harness to record when it is checked.
 type EvidenceSpec struct {
-	Kind  EvidenceKind `json:"kind"`
-	Path  string       `json:"path,omitempty"`  // file
-	Paths []string     `json:"paths,omitempty"` // diff: limit to these paths; empty means the whole project
+	Kind    EvidenceKind `json:"kind"`
+	Path    string       `json:"path,omitempty"`    // file
+	Paths   []string     `json:"paths,omitempty"`   // diff: limit to these paths; empty means the whole project
+	Command string       `json:"command,omitempty"` // command: an approved command's name
 }
 
 // Evidence is one recorded item. Content lives in the run repository's
@@ -52,9 +56,15 @@ type Evidence struct {
 	Baseline  string       `json:"baseline,omitempty"` // diff: the commit compared against
 	Files     int          `json:"files,omitempty"`    // diff: number of files changed
 	Absent    bool         `json:"absent,omitempty"`   // file: it didn't exist
-	Size      int64        `json:"size"`               // full content size in bytes
-	SHA256    string       `json:"sha256,omitempty"`   // of the full content
-	Blob      string       `json:"blob,omitempty"`     // key of the stored (possibly truncated) content
+	Command   string       `json:"command,omitempty"`  // command: its name
+	Argv      []string     `json:"argv,omitempty"`     // command: what ran
+	ExitCode  int          `json:"exitCode,omitempty"` // command: exit status
+	Duration  int64        `json:"durationMs,omitempty"`
+	TimedOut  bool         `json:"timedOut,omitempty"`
+	Sandboxed bool         `json:"sandboxed,omitempty"` // command: ran under the sandbox
+	Size      int64        `json:"size"`                // full content size in bytes
+	SHA256    string       `json:"sha256,omitempty"`    // of the full content
+	Blob      string       `json:"blob,omitempty"`      // key of the stored (possibly truncated) content
 	Truncated bool         `json:"truncated,omitempty"`
 	Error     string       `json:"error,omitempty"` // why it couldn't be collected
 }
@@ -82,12 +92,59 @@ func (e *Evidence) store(content []byte, blobs map[string][]byte) {
 type collector struct {
 	projectDir string
 	baseline   string
+	loadConfig func(projectDir string) (Config, error)
 	blobs      map[string][]byte
 	diffs      map[string]Evidence
+	commands   map[string]Evidence
+	scratch    string // this attempt's scratch root, created on first use
+
+	configOnce   sync.Once
+	loadedConfig Config
+	configErr    error
 }
 
-func newCollector(projectDir, baseline string) *collector {
-	return &collector{projectDir: projectDir, baseline: baseline, blobs: map[string][]byte{}, diffs: map[string]Evidence{}}
+func newCollector(projectDir, baseline string, loadConfig func(string) (Config, error)) *collector {
+	return &collector{
+		projectDir: projectDir, baseline: baseline, loadConfig: loadConfig,
+		blobs: map[string][]byte{}, diffs: map[string]Evidence{}, commands: map[string]Evidence{},
+	}
+}
+
+// config loads the project's config the first time a command needs it, so
+// a broken config only affects rules that run commands.
+func (c *collector) config() (Config, error) {
+	c.configOnce.Do(func() {
+		if c.loadConfig == nil {
+			c.loadedConfig = DefaultConfig()
+			return
+		}
+		c.loadedConfig, c.configErr = c.loadConfig(c.projectDir)
+	})
+	return c.loadedConfig, c.configErr
+}
+
+// scratchDir returns an empty directory for one command in this attempt.
+func (c *collector) scratchDir(name string) (string, error) {
+	if c.scratch == "" {
+		base := filepath.Join(c.projectDir, ".harness", "tmp")
+		if err := os.MkdirAll(base, 0700); err != nil {
+			return "", err
+		}
+		dir, err := os.MkdirTemp(base, "attempt-")
+		if err != nil {
+			return "", err
+		}
+		c.scratch = dir
+	}
+	dir := filepath.Join(c.scratch, name)
+	return dir, os.MkdirAll(dir, 0700)
+}
+
+// cleanup removes this attempt's scratch directories. Caches stay.
+func (c *collector) cleanup() {
+	if c.scratch != "" {
+		os.RemoveAll(c.scratch)
+	}
 }
 
 func (c *collector) collect(spec EvidenceSpec) Evidence {
@@ -102,6 +159,8 @@ func (c *collector) collect(spec EvidenceSpec) Evidence {
 		item := c.diff(spec.Paths)
 		c.diffs[key] = item
 		return item
+	case CommandEvidence:
+		return c.command(spec.Command)
 	default:
 		return Evidence{Kind: spec.Kind, Error: fmt.Sprintf("unsupported evidence %q", spec.Kind)}
 	}
