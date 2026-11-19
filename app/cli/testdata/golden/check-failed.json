@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "attempt": 1,
+  "run": {
+    "id": "RUN_ID",
+    "shortId": "SHORT",
+    "contract": "docs",
+    "version": 1,
+    "projectDir": "PROJECT",
+    "status": "failed",
+    "createdAt": "TIME",
+    "attempts": [
+      {
+        "number": 1,
+        "status": "failed",
+        "startedAt": "TIME",
+        "completedAt": "TIME",
+        "results": [
+          {
+            "rule": "readme",
+            "status": "failed",
+            "reason": "README.md does not exist"
+          },
+          {
+            "rule": "guide",
+            "status": "blocked",
+            "reason": "dependency readme did not pass"
+          }
+        ]
+      }
+    ]
+  }
+}

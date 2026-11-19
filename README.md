@@ -4,7 +4,7 @@ Local macOS prototype for contract-driven checks. Create a draft, publish immuta
 
 ## Command line
 
-The `harness` command line is being built alongside the desktop app. It can create a project, validate contract files written in YAML, and publish them as frozen versions:
+The `harness` command line is being built alongside the desktop app. It can create a project, validate and publish contracts written in YAML, and check a project against them, keeping every attempt:
 
 ```sh
 cd app && go install ./cmd/harness   # installs harness into $(go env GOPATH)/bin
@@ -12,7 +12,10 @@ cd ~/my-project
 harness init
 harness contract validate harness/example.yaml
 harness contract publish harness/example.yaml
-harness contract versions example
+harness check example        # fails: no README.md
+touch README.md
+harness recheck              # passes; attempt 1's failure is kept
+harness show
 ```
 
 See [the command line guide](docs/cli.md) for the contract file format, output, and exit codes.
