@@ -3,12 +3,14 @@
 .env.*
 !.env.example
 /Plan.md
+/Plan-CLI.md
 
 /app/build/
 /app/frontend/node_modules/
 /app/frontend/dist/*
 !/app/frontend/dist/.gitkeep
 /app/frontend/wailsjs/
+/app/frontend/package.json.md5
 /app/frontend/test-results/
 /app/frontend/playwright-report/
 *.tsbuildinfo
