@@ -481,7 +481,15 @@ harness never merges the branch. Review it (`git diff <start>...harness/<run>`) 
 
 A run that wasn't accepted can be continued with `harness work --resume <run>`: after Ctrl-C, a time limit, or a worker error, or, with a higher `--max-attempts` (which counts the earlier attempts), after it was rejected. It uses the same workspace and branch, numbers attempts after the earlier ones, and tells the worker what failed in the last checked attempt. `--timeout` starts again from the resume.
 
-`harness show` prints a work run's task, worker, outcome, branch, and each attempt's worker line. `harness evidence [run] --prompt` prints exactly what the worker was told in an attempt (`--attempt <n>`), and `--output` what it printed.
+`harness show` prints a work run's task, worker, outcome, branch, and each attempt's worker line.
+
+`harness show --follow [run]` watches a work run from another terminal: it prints the run's progress from the start, exactly as `harness work` shows it, then new progress as it happens, until the run ends, and exits with the run's exit code. Ctrl-C stops following, not the run. It works on finished runs too, replaying them. `--quiet` leaves out the worker's output, and `--json` prints one JSON object per event, one per line, for programs to consume:
+
+```
+{"schema":1,"run":"tlaqnl…","seq":3,"type":"worker_output","time":"…","attempt":1,"line":"step 1"}
+```
+
+Event types are `run_started` (with `attempt`, the attempts made before, when resumed), `attempt_started`, `worker_output` (`line`), `worker_finished` (`worker`, the same record as in `show --json`), `attempt_finished`, and `run_finished` (`outcome`, `reason`). Events are stored with the run as they happen, numbered by `seq`. `harness evidence [run] --prompt` prints exactly what the worker was told in an attempt (`--attempt <n>`), and `--output` what it printed.
 
 ### Workers
 

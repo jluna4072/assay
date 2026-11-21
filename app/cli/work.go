@@ -172,7 +172,7 @@ func resumeWork(e Env, cmd *command, projectDir, prefix string, maxAttempts int,
 	}
 	ctx, stop := interruptible(e)
 	defer stop()
-	printer := &workPrinter{w: e.Stderr, root: s.project.Root, quiet: quiet, resumed: true}
+	printer := &workPrinter{w: e.Stderr, root: s.project.Root, quiet: quiet}
 	run, err := s.service.ResumeWork(ctx, backend.ResumeOptions{RunID: run.ID, MaxAttempts: maxAttempts, Timeout: timeout}, printer.event)
 	if err != nil {
 		fmt.Fprintf(e.Stderr, "harness work: %v\n", err)
@@ -205,10 +205,9 @@ func workExit(outcome backend.WorkOutcome) int {
 
 // workPrinter prints a work run's progress.
 type workPrinter struct {
-	w       io.Writer
-	root    string
-	quiet   bool
-	resumed bool
+	w     io.Writer
+	root  string
+	quiet bool
 }
 
 func (p *workPrinter) event(event backend.Event) {
@@ -216,8 +215,8 @@ func (p *workPrinter) event(event backend.Event) {
 	switch event.Type {
 	case backend.EventRunStarted:
 		verb := "work"
-		if p.resumed {
-			verb = fmt.Sprintf("resuming after attempt %d ·", len(run.Attempts))
+		if event.Attempt > 0 {
+			verb = fmt.Sprintf("resuming after attempt %d ·", event.Attempt)
 		}
 		fmt.Fprintf(p.w, "%s %s@%d · run %s · worker %s\n", verb, run.ContractID, run.Version, shortID(run.ID), run.Work.Worker)
 		fmt.Fprintf(p.w, "workspace %s · branch %s\n", relative(p.root, run.Work.Workspace), run.Work.Branch)
@@ -232,7 +231,10 @@ func (p *workPrinter) event(event backend.Event) {
 	case backend.EventWorkerFinished:
 		fmt.Fprintf(p.w, "  %s\n", describeWorker(*event.Worker))
 	case backend.EventAttemptFinished:
-		attempt := run.Attempts[len(run.Attempts)-1]
+		if event.Attempt < 1 || event.Attempt > len(run.Attempts) {
+			return
+		}
+		attempt := run.Attempts[event.Attempt-1]
 		if attempt.Worker != nil && attempt.Worker.Commit != "" {
 			fmt.Fprintf(p.w, "  committed the workspace as %s\n", shortCommit(attempt.Worker.Commit))
 		}
@@ -289,4 +291,60 @@ func relative(root, path string) string {
 		return rel
 	}
 	return path
+}
+
+// followPoll is how often --follow checks for new events.
+var followPoll = 250 * time.Millisecond
+
+// followRun prints a work run's events from the start, then as they're
+// recorded, until the run finishes. Another process may be running it.
+func followRun(e Env, s *session, run backend.Run, asJSON, quiet bool) int {
+	if run.Work == nil {
+		fmt.Fprintf(e.Stderr, "harness show: run %s wasn't made by \"harness work\", so there's nothing to follow\n", shortID(run.ID))
+		return ExitUsage
+	}
+	ctx, stop := interruptible(e)
+	defer stop()
+	printer := &workPrinter{w: e.Stdout, root: s.project.Root, quiet: quiet}
+	after := 0
+	for {
+		events, err := s.service.Events(run.ID, after)
+		if err != nil {
+			fmt.Fprintf(e.Stderr, "harness show: %v\n", err)
+			return ExitOperational
+		}
+		current, err := s.service.GetRun(run.ID)
+		if err != nil {
+			fmt.Fprintf(e.Stderr, "harness show: %v\n", err)
+			return ExitOperational
+		}
+		finished := false
+		for _, event := range events {
+			after = event.Seq
+			if asJSON {
+				writeJSONLine(e.Stdout, struct {
+					Schema int    `json:"schema"`
+					Run    string `json:"run"`
+					backend.Event
+				}{JSONSchema, strings.ToLower(run.ID), event})
+			} else {
+				event.Run = &current
+				printer.event(event)
+			}
+			finished = finished || event.Type == backend.EventRunFinished
+		}
+		// A run recorded before events were stored, or one whose last
+		// event is already in, ends here.
+		if finished || len(events) == 0 && current.Work.Outcome != backend.WorkRunning {
+			if !asJSON {
+				printWorkResult(e.Stdout, current, s.project.Root)
+			}
+			return workExit(current.Work.Outcome)
+		}
+		select {
+		case <-ctx.Done():
+			return ExitOK
+		case <-time.After(followPoll):
+		}
+	}
 }

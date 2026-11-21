@@ -273,3 +273,10 @@ func version() string {
 	}
 	return Version + " (" + revision + ")"
 }
+
+// writeJSONLine writes value as one line of JSON, for streams of objects.
+func writeJSONLine(w io.Writer, value any) {
+	encoder := json.NewEncoder(w)
+	encoder.SetEscapeHTML(false)
+	encoder.Encode(value)
+}

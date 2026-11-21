@@ -62,6 +62,10 @@ type RunRepository interface {
 	AppendAttempt(string, Attempt) (Run, error)
 	// UpdateWork replaces a work run's Work record, such as its outcome.
 	UpdateWork(string, Work) error
+	// AppendEvent records a work run's event and returns its number;
+	// ListEvents returns the events after a number, in order.
+	AppendEvent(string, Event) (int, error)
+	ListEvents(string, int) ([]Event, error)
 	GetBlob(string) ([]byte, error)
 }
 

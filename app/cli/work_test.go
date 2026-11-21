@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // workCLIProject is a committed git repository with a contract that needs
@@ -136,4 +137,65 @@ func firstRun(t *testing.T, dir string) string {
 	}
 	json.Unmarshal([]byte(mustRun(t, dir, "runs", "--json")), &listed)
 	return listed.Runs[len(listed.Runs)-1].ID
+}
+
+// show --follow prints a run another caller is making, as it happens.
+func TestShowFollow(t *testing.T) {
+	dir := workCLIProject(t, `cat >/dev/null; echo step one; sleep 1; echo step two; echo hi > README.md`)
+	done := make(chan int)
+	go func() {
+		_, _, code := runIn(dir, false, "work", "readme", "--task", "x")
+		done <- code
+	}()
+	// Wait for the run to exist, then follow it.
+	var run string
+	for i := 0; i < 100 && run == ""; i++ {
+		var listed struct {
+			Runs []struct{ ID string } `json:"runs"`
+		}
+		if stdout, _, code := runIn(dir, false, "runs", "--json"); code == ExitOK {
+			json.Unmarshal([]byte(stdout), &listed)
+			if len(listed.Runs) > 0 {
+				run = listed.Runs[0].ID
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	stdout, stderr, code := runIn(dir, false, "show", "--follow", run)
+	if code != ExitOK {
+		t.Fatalf("follow: exit %d\n%s%s", code, stdout, stderr)
+	}
+	for _, want := range []string{"work readme@1 · run ", "attempt 1 of 3 · running writer", "  │ step one\n  │ step two\n", "✓ readme", "ACCEPTED · readme@1"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("follow lacks %q:\n%s", want, stdout)
+		}
+	}
+	if code := <-done; code != ExitOK {
+		t.Fatalf("work: exit %d", code)
+	}
+
+	// Following a finished run replays it; JSON is one event per line.
+	stdout = mustRun(t, dir, "show", "--follow", "--json", run)
+	lines := strings.Split(strings.TrimSpace(stdout), "\n")
+	var first, last struct {
+		Schema  int    `json:"schema"`
+		Run     string `json:"run"`
+		Seq     int    `json:"seq"`
+		Type    string `json:"type"`
+		Outcome string `json:"outcome"`
+	}
+	json.Unmarshal([]byte(lines[0]), &first)
+	json.Unmarshal([]byte(lines[len(lines)-1]), &last)
+	if first.Schema != 1 || first.Run != run || first.Seq != 1 || first.Type != "run_started" || last.Type != "run_finished" || last.Outcome != "accepted" {
+		t.Fatalf("json lines:\n%s", stdout)
+	}
+	if out := mustRun(t, dir, "show", "--follow", "--quiet", run); strings.Contains(out, "│") {
+		t.Fatalf("--quiet printed worker output:\n%s", out)
+	}
+
+	// A run not made by work has nothing to follow.
+	runIn(dir, false, "check", "readme") // fails: the README is only on the work branch
+	if _, stderr, code := runIn(dir, false, "show", "--follow"); code != ExitUsage || !strings.Contains(stderr, "nothing to follow") {
+		t.Fatalf("check run: exit %d\n%s", code, stderr)
+	}
 }

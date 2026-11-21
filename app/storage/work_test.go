@@ -318,3 +318,52 @@ func TestCleanWorkspaces(t *testing.T) {
 		t.Fatalf("recreated workspace lacks the committed README: %v", err)
 	}
 }
+
+func TestWorkEventsAreStored(t *testing.T) {
+	dir, s := workProject(t)
+	run, live := work(t, dir, s, workConfig(false, map[string]string{"fixer": fixesOnRepair}), "", 3, time.Minute)
+	stored, err := s.Events(run.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != len(live) {
+		t.Fatalf("stored %d events, emitted %d", len(stored), len(live))
+	}
+	for i, e := range stored {
+		if e.Seq != i+1 || e.Type != live[i].Type || e.Line != live[i].Line || e.Attempt != live[i].Attempt || live[i].Seq != e.Seq || e.Run != nil {
+			t.Fatalf("event %d: stored %+v, emitted %+v", i, e, live[i])
+		}
+	}
+	last := stored[len(stored)-1]
+	if last.Type != backend.EventRunFinished || last.Outcome != backend.WorkAccepted || last.Reason != "every rule passed on attempt 2" {
+		t.Fatalf("last event: %+v", last)
+	}
+	var lines []string
+	for _, e := range stored {
+		if e.Type == backend.EventWorkerOutput {
+			lines = append(lines, e.Line)
+		}
+		if e.Type == backend.EventWorkerFinished && (e.Worker == nil || e.Worker.Worker != "fixer") {
+			t.Fatalf("worker_finished: %+v", e)
+		}
+	}
+	if strings.Join(lines, "|") != "working|all done, everything passes|working|fixed it|all done, everything passes" {
+		t.Fatalf("worker lines: %q", lines)
+	}
+	if later, _ := s.Events(run.ID, stored[3].Seq); len(later) != len(stored)-4 || later[0].Seq != 5 {
+		t.Fatalf("events after 4: %d", len(later))
+	}
+
+	// A resumed run's events continue its numbering, and run_started says
+	// how many attempts came before.
+	config := workConfig(false, map[string]string{"never": `cat >/dev/null; echo "# Project" > README.md`})
+	rejected, _ := work(t, dir, s, config, "never", 1, time.Minute)
+	before, _ := s.Events(rejected.ID, 0)
+	if _, err := s.ResumeWork(context.Background(), backend.ResumeOptions{RunID: rejected.ID, MaxAttempts: 2}, nil); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := s.Events(rejected.ID, len(before))
+	if len(after) == 0 || after[0].Seq != len(before)+1 || after[0].Type != backend.EventRunStarted || after[0].Attempt != 1 {
+		t.Fatalf("resumed events: %+v", after)
+	}
+}

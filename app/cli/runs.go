@@ -79,6 +79,11 @@ shortened to any unique prefix.
 Flags:
   --attempt <n>     Only attempt n
   --evidence        List the evidence recorded for each rule
+  --follow          For a run made by "harness work": print its progress
+                    from the start, then as it happens, until it ends
+                    (Ctrl-C stops following, not the run). With --json,
+                    print one JSON object per event, one per line
+  --quiet           With --follow, don't print the worker's output
   --json            Print one JSON object instead of text
 ` + projectFlagHelp + `
 `,
@@ -608,6 +613,8 @@ func runShowRun(e Env, cmd *command, args []string) int {
 	projectDir := fs.String("project", "", "")
 	only := fs.Int("attempt", 0, "")
 	withEvidence := fs.Bool("evidence", false, "")
+	follow := fs.Bool("follow", false, "")
+	quiet := fs.Bool("quiet", false, "")
 	ids, code, ok := parseFlags(e, cmd, fs, args)
 	if !ok {
 		return code
@@ -633,6 +640,13 @@ func runShowRun(e Env, cmd *command, args []string) int {
 	run, code := findRun(e, cmd, s, prefix)
 	if code != ExitOK {
 		return code
+	}
+	if *follow {
+		if *only > 0 || *withEvidence {
+			fmt.Fprintln(e.Stderr, "harness show: --follow can't be combined with --attempt or --evidence")
+			return ExitUsage
+		}
+		return followRun(e, s, run, *asJSON, *quiet)
 	}
 	attempts := run.Attempts
 	if *only > 0 {

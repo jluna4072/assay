@@ -131,12 +131,15 @@ const (
 // Event reports progress of a work run. The command line prints events;
 // other front ends can show them their own way.
 type Event struct {
-	Type    EventType  `json:"type"`
-	Time    time.Time  `json:"time"`
-	Run     *Run       `json:"-"`                 // the run as of this event
-	Attempt int        `json:"attempt,omitempty"` // 1-based
-	Line    string     `json:"line,omitempty"`    // worker_output: one line
-	Worker  *WorkerRun `json:"worker,omitempty"`  // worker_finished
+	Seq     int         `json:"seq,omitempty"` // the event's number in its run, once stored
+	Type    EventType   `json:"type"`
+	Time    time.Time   `json:"time"`
+	Run     *Run        `json:"-"`                 // the run as of this event
+	Attempt int         `json:"attempt,omitempty"` // 1-based; for run_started, the attempts made before (a resumed run)
+	Line    string      `json:"line,omitempty"`    // worker_output: one line
+	Worker  *WorkerRun  `json:"worker,omitempty"`  // worker_finished
+	Outcome WorkOutcome `json:"outcome,omitempty"` // run_finished
+	Reason  string      `json:"reason,omitempty"`  // run_finished
 }
 
 // Work makes a workspace for the project, then runs the worker and checks
@@ -145,12 +148,7 @@ type Event struct {
 // as cancelled. The error is non-nil only when the run couldn't start; how
 // it ended is in the returned run's Work.
 func (s *Service) Work(ctx context.Context, options WorkOptions, events func(Event)) (Run, error) {
-	emit := func(e Event) {
-		if events != nil {
-			e.Time = time.Now().UTC()
-			events(e)
-		}
-	}
+	emit := s.recorder(events)
 	if strings.TrimSpace(options.Task) == "" {
 		return Run{}, errors.New("a task is required")
 	}
@@ -209,7 +207,7 @@ func (s *Service) Work(ctx context.Context, options WorkOptions, events func(Eve
 	if err := store.CreateRun(run); err != nil {
 		return Run{}, err
 	}
-	emit(Event{Type: EventRunStarted, Run: &run})
+	emit(Event{Type: EventRunStarted, Run: &run, Attempt: len(run.Attempts)})
 	return s.workLoop(ctx, store, run, published.Contract, worker, config, nil, options.Timeout, emit), nil
 }
 
@@ -226,7 +224,7 @@ func (s *Service) workLoop(ctx context.Context, store RunRepository, run Run, co
 		} else if latest, err := store.GetRun(run.ID); err == nil {
 			run = latest
 		}
-		emit(Event{Type: EventRunFinished, Run: &run})
+		emit(Event{Type: EventRunFinished, Run: &run, Outcome: run.Work.Outcome, Reason: run.Work.Reason})
 		return run
 	}
 
@@ -302,12 +300,7 @@ type ResumeOptions struct {
 // from the branch if it was cleaned up, and tells the worker what failed
 // in the last checked attempt.
 func (s *Service) ResumeWork(ctx context.Context, options ResumeOptions, events func(Event)) (Run, error) {
-	emit := func(e Event) {
-		if events != nil {
-			e.Time = time.Now().UTC()
-			events(e)
-		}
-	}
+	emit := s.recorder(events)
 	store, err := s.runRepository()
 	if err != nil {
 		return Run{}, err
@@ -378,7 +371,7 @@ func (s *Service) ResumeWork(ctx context.Context, options ResumeOptions, events 
 	if err := store.UpdateWork(run.ID, *run.Work); err != nil {
 		return Run{}, err
 	}
-	emit(Event{Type: EventRunStarted, Run: &run})
+	emit(Event{Type: EventRunStarted, Run: &run, Attempt: len(run.Attempts)})
 	return s.workLoop(ctx, store, run, published.Contract, worker, config, previous, timeout, emit), nil
 }
 
@@ -653,4 +646,33 @@ func shortHash(hash string) string {
 		return hash[:12]
 	}
 	return hash
+}
+
+// recorder returns a function that stores each event of a run, so another
+// process can follow it, then passes it to events. A failure to store an
+// event doesn't stop the run.
+func (s *Service) recorder(events func(Event)) func(Event) {
+	return func(e Event) {
+		e.Time = time.Now().UTC()
+		if e.Run != nil {
+			if store, err := s.runRepository(); err == nil {
+				if seq, err := store.AppendEvent(e.Run.ID, e); err == nil {
+					e.Seq = seq
+				}
+			}
+		}
+		if events != nil {
+			events(e)
+		}
+	}
+}
+
+// Events returns a work run's stored events after seq, in order, with
+// Run unset.
+func (s *Service) Events(runID string, after int) ([]Event, error) {
+	store, err := s.runRepository()
+	if err != nil {
+		return nil, err
+	}
+	return store.ListEvents(runID, after)
 }
