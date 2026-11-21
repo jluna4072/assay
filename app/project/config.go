@@ -52,12 +52,39 @@ commands: {}
 #    writes: scratch          # scratch (a temporary directory) or project
 #    env: [GOFLAGS]           # variables passed through from your environment
 #    caches: [GOCACHE]        # variables pointed at .harness/cache/go-test/<NAME>
+
+# Reviewers judge "check: review" rules: a model reads the rule's criterion
+# and evidence and answers pass, fail, or insufficient_evidence. Contracts
+# name a reviewer (reviewer: careful) or use the default, so each person
+# chooses the model. A command reviewer is a program that reads a review
+# request as JSON on stdin and writes its verdict as JSON on stdout; it runs
+# like an approved command, but can never write to the project. Test one
+# with "harness reviewer test <name>".
+reviewers: {}
+#  careful:
+#    protocol: command
+#    run: [my-reviewer]       # program and arguments; no shell
+#    timeout: 2m              # at most 1h
+#    network: on              # off, localhost (a local model), or on
+#    env: [MY_API_KEY]        # variables passed through from your environment
+# default_reviewer: careful   # needed only with more than one reviewer
 `
 
 type configFile struct {
-	Version  *int                   `yaml:"version"`
-	Sandbox  *string                `yaml:"sandbox"`
-	Commands map[string]commandFile `yaml:"commands"`
+	Version         *int                    `yaml:"version"`
+	Sandbox         *string                 `yaml:"sandbox"`
+	Commands        map[string]commandFile  `yaml:"commands"`
+	Reviewers       map[string]reviewerFile `yaml:"reviewers"`
+	DefaultReviewer string                  `yaml:"default_reviewer"`
+}
+
+type reviewerFile struct {
+	Protocol string   `yaml:"protocol"`
+	Run      []string `yaml:"run"`
+	Timeout  string   `yaml:"timeout"`
+	Network  string   `yaml:"network"`
+	Env      []string `yaml:"env"`
+	Caches   []string `yaml:"caches"`
 }
 
 type commandFile struct {
@@ -132,33 +159,11 @@ func ParseConfig(data []byte) (backend.Config, []contractfile.Problem) {
 		}
 	}
 	for name, command := range file.Commands {
-		spec := backend.CommandSpec{Name: name, Run: command.Run, Dir: command.Dir, Env: command.Env, Caches: command.Caches}
 		prefix := fmt.Sprintf("command %q: ", name)
-		if !backend.CommandName(name) {
-			add("%sname must be letters, digits, '.', '_', or '-'", prefix)
-		}
-		if len(command.Run) == 0 || strings.TrimSpace(command.Run[0]) == "" {
-			add("%srun needs a program and its arguments, like [go, test, ./...]", prefix)
-		} else if strings.HasPrefix(command.Run[0], "-") {
-			add("%srun's program can't start with '-'", prefix)
-		}
+		spec := checkProgram(name, prefix, command.Run, command.Timeout, command.Network, command.Env, command.Caches, add)
+		spec.Dir = command.Dir
 		if command.Dir != "" && command.Dir != "." && (!filepath.IsLocal(command.Dir) || strings.Contains(command.Dir, "\\")) {
 			add("%sdir must be a relative path inside the project", prefix)
-		}
-		if command.Timeout != "" {
-			timeout, err := time.ParseDuration(command.Timeout)
-			if err != nil || timeout <= 0 || timeout > MaxCommandTimeout {
-				add("%stimeout must be a duration between 1s and %s, like 5m", prefix, MaxCommandTimeout)
-			}
-			spec.Timeout = timeout
-		}
-		switch backend.NetworkAccess(command.Network) {
-		case "", backend.NetworkOff:
-			spec.Network = backend.NetworkOff
-		case backend.NetworkLocalhost, backend.NetworkOn:
-			spec.Network = backend.NetworkAccess(command.Network)
-		default:
-			add("%snetwork must be off, localhost, or on", prefix)
 		}
 		switch command.Writes {
 		case "", "scratch":
@@ -167,16 +172,65 @@ func ParseConfig(data []byte) (backend.Config, []contractfile.Problem) {
 		default:
 			add("%swrites must be scratch or project", prefix)
 		}
-		for _, variable := range append(append([]string{}, command.Env...), command.Caches...) {
-			if !variableName.MatchString(variable) {
-				add("%s%q isn't an environment variable name", prefix, variable)
-			} else if reservedVariables[variable] {
-				add("%s%s is set by harness and can't be configured", prefix, variable)
-			}
-		}
 		config.Commands[name] = spec
+	}
+	for name, reviewer := range file.Reviewers {
+		prefix := fmt.Sprintf("reviewer %q: ", name)
+		spec := backend.ReviewerSpec{Name: name, Protocol: backend.ReviewProtocol(reviewer.Protocol)}
+		switch spec.Protocol {
+		case backend.CommandProtocol:
+			spec.Command = checkProgram(name, prefix, reviewer.Run, reviewer.Timeout, reviewer.Network, reviewer.Env, reviewer.Caches, add)
+		case "":
+			add("%sprotocol is required; this harness supports: command", prefix)
+		default:
+			add("%sprotocol %q isn't supported by this harness; it supports: command", prefix, reviewer.Protocol)
+		}
+		config.Reviewers[name] = spec
+	}
+	if file.DefaultReviewer != "" {
+		if _, ok := file.Reviewers[file.DefaultReviewer]; !ok {
+			add("default_reviewer %q isn't one of the reviewers configured here", file.DefaultReviewer)
+		}
+		config.DefaultReviewer = file.DefaultReviewer
 	}
 	// Commands are a map, so sort problems for stable output.
 	sort.SliceStable(problems, func(i, j int) bool { return problems[i].Message < problems[j].Message })
 	return config, problems
+}
+
+// checkProgram checks the settings commands and command reviewers share
+// and returns them as a CommandSpec.
+func checkProgram(name, prefix string, run []string, timeout, network string, env, caches []string, add func(string, ...any)) backend.CommandSpec {
+	spec := backend.CommandSpec{Name: name, Run: run, Env: env, Caches: caches}
+	if !backend.CommandName(name) {
+		add("%sname must be letters, digits, '.', '_', or '-'", prefix)
+	}
+	if len(run) == 0 || strings.TrimSpace(run[0]) == "" {
+		add("%srun needs a program and its arguments, like [go, test, ./...]", prefix)
+	} else if strings.HasPrefix(run[0], "-") {
+		add("%srun's program can't start with '-'", prefix)
+	}
+	if timeout != "" {
+		parsed, err := time.ParseDuration(timeout)
+		if err != nil || parsed <= 0 || parsed > MaxCommandTimeout {
+			add("%stimeout must be a duration between 1s and %s, like 5m", prefix, MaxCommandTimeout)
+		}
+		spec.Timeout = parsed
+	}
+	switch backend.NetworkAccess(network) {
+	case "", backend.NetworkOff:
+		spec.Network = backend.NetworkOff
+	case backend.NetworkLocalhost, backend.NetworkOn:
+		spec.Network = backend.NetworkAccess(network)
+	default:
+		add("%snetwork must be off, localhost, or on", prefix)
+	}
+	for _, variable := range append(append([]string{}, env...), caches...) {
+		if !variableName.MatchString(variable) {
+			add("%s%q isn't an environment variable name", prefix, variable)
+		} else if reservedVariables[variable] {
+			add("%s%s is set by harness and can't be configured", prefix, variable)
+		}
+	}
+	return spec
 }

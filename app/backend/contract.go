@@ -12,6 +12,7 @@ type RuleResult struct {
 	Reason   string       `json:"reason"`
 	Status   ResultStatus `json:"status"`
 	Evidence []Evidence   `json:"evidence,omitempty"`
+	Review   *Review      `json:"review,omitempty"` // review rules that reached a reviewer
 }
 
 type RuleKind string
@@ -22,6 +23,9 @@ const (
 	// CommandSucceeds passes when the approved command named by Command
 	// exits with status 0.
 	CommandSucceeds RuleKind = "command_succeeds"
+	// ReviewCheck passes when the reviewer named by Reviewer (or the project's
+	// default reviewer) judges that the rule's evidence meets its criterion.
+	ReviewCheck RuleKind = "review"
 )
 
 type Rule struct {
@@ -30,6 +34,7 @@ type Rule struct {
 	Kind      RuleKind       `json:"kind"`
 	Path      string         `json:"path"`
 	Command   string         `json:"command,omitempty"`
+	Reviewer  string         `json:"reviewer,omitempty"`
 	DependsOn []string       `json:"dependsOn"`
 	Evidence  []EvidenceSpec `json:"evidence,omitempty"`
 }

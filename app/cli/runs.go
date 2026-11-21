@@ -112,6 +112,7 @@ type resultJSON struct {
 	Status   string         `json:"status"`
 	Reason   string         `json:"reason,omitempty"`
 	Evidence []evidenceJSON `json:"evidence,omitempty"`
+	Review   *reviewJSON    `json:"review,omitempty"`
 }
 
 // evidenceJSON describes one recorded evidence item; "harness evidence"
@@ -124,6 +125,7 @@ type evidenceJSON struct {
 	Files     int      `json:"files,omitempty"`
 	Absent    bool     `json:"absent,omitempty"`
 	Command   string   `json:"command,omitempty"`
+	Reviewer  string   `json:"reviewer,omitempty"`
 	Argv      []string `json:"argv,omitempty"`
 	ExitCode  *int     `json:"exitCode,omitempty"`   // commands that ran
 	Duration  *int64   `json:"durationMs,omitempty"` // commands that ran
@@ -138,7 +140,7 @@ type evidenceJSON struct {
 func toEvidenceJSON(item backend.Evidence) evidenceJSON {
 	out := evidenceJSON{
 		Kind: string(item.Kind), Path: item.Path, Paths: item.Paths, Baseline: item.Baseline, Files: item.Files,
-		Absent: item.Absent, Command: item.Command, Argv: item.Argv, TimedOut: item.TimedOut,
+		Absent: item.Absent, Command: item.Command, Reviewer: item.Reviewer, Argv: item.Argv, TimedOut: item.TimedOut,
 		Size: item.Size, SHA256: item.SHA256, Truncated: item.Truncated, Error: item.Error,
 	}
 	if item.Kind == backend.CommandEvidence && item.Error == "" {
@@ -157,6 +159,10 @@ func toRunJSON(run backend.Run) runJSON {
 		attempt := attemptJSON{Number: a.Number, Status: string(a.Status), StartedAt: a.StartedAt, CompletedAt: a.CompletedAt, Results: []resultJSON{}}
 		for _, r := range a.Results {
 			result := resultJSON{Rule: r.RuleID, Status: string(r.Status), Reason: r.Reason}
+			if r.Review != nil {
+				review := toReviewJSON(*r.Review)
+				result.Review = &review
+			}
 			for _, item := range r.Evidence {
 				result.Evidence = append(result.Evidence, toEvidenceJSON(item))
 			}
@@ -268,7 +274,7 @@ func printResults(w io.Writer, attempt backend.Attempt, withEvidence bool) {
 		if mark == "" {
 			mark = "?"
 		}
-		reason := r.Reason
+		reason := oneLine(r.Reason)
 		if r.Status == backend.Blocked {
 			reason = "blocked: " + reason
 		}
@@ -278,6 +284,9 @@ func printResults(w io.Writer, attempt backend.Attempt, withEvidence bool) {
 			fmt.Fprintf(w, "  %s %-*s   %s\n", mark, width, r.RuleID, reason)
 		}
 		if withEvidence {
+			if r.Review != nil && r.Review.Error == "" {
+				fmt.Fprintf(w, "      review by %s · %s\n", r.Review.Reviewer, describeReview(*r.Review))
+			}
 			for i, item := range r.Evidence {
 				fmt.Fprintf(w, "      [%d] %s\n", i+1, describeEvidence(item))
 			}
@@ -298,6 +307,10 @@ func describeEvidence(item backend.Evidence) string {
 		}
 	case backend.CommandEvidence:
 		subject = "command " + item.Command
+	case backend.ReviewRequestEvidence:
+		subject = "review request to " + item.Reviewer
+	case backend.ReviewResponseEvidence:
+		subject = "review response from " + item.Reviewer
 	default:
 		subject = string(item.Kind)
 	}

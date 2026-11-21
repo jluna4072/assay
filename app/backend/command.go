@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -43,12 +44,43 @@ type CommandSpec struct {
 
 // Config is a project's local settings.
 type Config struct {
-	Sandbox  bool // run approved commands under the OS sandbox (the default)
-	Commands map[string]CommandSpec
+	Sandbox   bool // run approved commands and reviewers under the OS sandbox (the default)
+	Commands  map[string]CommandSpec
+	Reviewers map[string]ReviewerSpec
+	// DefaultReviewer reviews rules that don't name a reviewer. When it's
+	// empty and exactly one reviewer is configured, that one is the default.
+	DefaultReviewer string
 }
 
 // DefaultConfig is the configuration of a project with no config file.
-func DefaultConfig() Config { return Config{Sandbox: true, Commands: map[string]CommandSpec{}} }
+func DefaultConfig() Config {
+	return Config{Sandbox: true, Commands: map[string]CommandSpec{}, Reviewers: map[string]ReviewerSpec{}}
+}
+
+// Reviewer returns the reviewer a rule names, or the default reviewer when
+// name is empty.
+func (c Config) Reviewer(name string) (ReviewerSpec, error) {
+	if name == "" {
+		name = c.DefaultReviewer
+		if name == "" {
+			switch len(c.Reviewers) {
+			case 0:
+				return ReviewerSpec{}, fmt.Errorf("no reviewers are configured in .harness/config.yaml")
+			case 1:
+				for _, only := range c.Reviewers {
+					return only, nil
+				}
+			default:
+				return ReviewerSpec{}, fmt.Errorf("the rule doesn't name a reviewer and .harness/config.yaml sets no default_reviewer")
+			}
+		}
+	}
+	spec, ok := c.Reviewers[name]
+	if !ok {
+		return ReviewerSpec{}, fmt.Errorf("reviewer %q isn't configured in .harness/config.yaml", name)
+	}
+	return spec, nil
+}
 
 // SandboxAvailable reports whether approved commands can run sandboxed on
 // this machine, and why not. It is a variable so tests can simulate a
@@ -158,47 +190,86 @@ func (c *collector) runCommand(name string) Evidence {
 		return item
 	}
 	item.Argv = spec.Run
-	if config.Sandbox {
-		if err := SandboxAvailable(); err != nil {
-			item.Error = fmt.Sprintf("can't run commands sandboxed: %v. Set \"sandbox: off\" in .harness/config.yaml to run them without the sandbox", err)
-			return item
-		}
-	}
-
-	dir := c.projectDir
-	if spec.Dir != "" && spec.Dir != "." {
-		root, err := os.OpenRoot(c.projectDir)
-		if err != nil {
-			item.Error = err.Error()
-			return item
-		}
-		info, err := root.Stat(spec.Dir)
-		root.Close()
-		if err != nil || !info.IsDir() {
-			item.Error = fmt.Sprintf("dir %q isn't a directory inside the project", spec.Dir)
-			return item
-		}
-		dir = filepath.Join(c.projectDir, spec.Dir)
-	}
-	program, err := exec.LookPath(spec.Run[0])
-	if err != nil {
-		item.Error = fmt.Sprintf("can't find %q: %v", spec.Run[0], err)
-		return item
-	}
-
-	state := filepath.Join(c.projectDir, ".harness")
-	scratch, err := c.scratchDir(name)
+	scratch, err := c.scratchDir("command", name)
 	if err != nil {
 		item.Error = err.Error()
 		return item
 	}
-	cache := filepath.Join(state, "cache", name)
+	out := &output{hash: sha256.New()}
+	result, err := runProcess(process{
+		spec: spec, sandbox: config.Sandbox, project: c.projectDir, scratch: scratch,
+		cache:  filepath.Join(c.projectDir, ".harness", "cache", name),
+		stdout: out, stderr: out,
+	})
+	if err != nil {
+		item.Error = err.Error()
+		return item
+	}
+	item.Duration, item.TimedOut, item.ExitCode, item.Sandboxed = result.duration, result.timedOut, result.exitCode, result.sandboxed
+	item.Size = out.size
+	item.SHA256 = hex.EncodeToString(out.hash.Sum(nil))
+	kept := out.kept.Bytes()
+	item.Truncated = int64(len(kept)) < out.size
+	item.Blob = sha(kept)
+	c.blobs[item.Blob] = kept
+	return item
+}
+
+// process is one run of an approved program: a command or a reviewer.
+type process struct {
+	spec    CommandSpec
+	sandbox bool   // run under the OS sandbox
+	project string // the project root
+	scratch string // an empty directory for this run; TMPDIR
+	cache   string // persistent cache root for spec.Caches
+	stdin   []byte // nil for no input
+	stdout  io.Writer
+	stderr  io.Writer
+}
+
+type processResult struct {
+	exitCode  int // -1 when timed out
+	timedOut  bool
+	duration  int64 // milliseconds
+	sandboxed bool
+}
+
+// runProcess runs p with a cleared environment, in its own process group,
+// under the sandbox when p.sandbox is set. The error is non-nil only when
+// the program couldn't be started; exit statuses and timeouts are results.
+func runProcess(p process) (processResult, error) {
+	var result processResult
+	spec := p.spec
+	if p.sandbox {
+		if err := SandboxAvailable(); err != nil {
+			return result, fmt.Errorf("can't run %s sandboxed: %v. Set \"sandbox: off\" in .harness/config.yaml to run it without the sandbox", spec.Name, err)
+		}
+	}
+	dir := p.project
+	if spec.Dir != "" && spec.Dir != "." {
+		root, err := os.OpenRoot(p.project)
+		if err != nil {
+			return result, err
+		}
+		info, err := root.Stat(spec.Dir)
+		root.Close()
+		if err != nil || !info.IsDir() {
+			return result, fmt.Errorf("dir %q isn't a directory inside the project", spec.Dir)
+		}
+		dir = filepath.Join(p.project, spec.Dir)
+	}
+	program, err := exec.LookPath(spec.Run[0])
+	if err != nil {
+		return result, fmt.Errorf("can't find %q: %v", spec.Run[0], err)
+	}
+
+	state := filepath.Join(p.project, ".harness")
 	env := []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + os.Getenv("HOME"),
 		"LANG=" + firstNonEmpty(os.Getenv("LANG"), "en_US.UTF-8"),
-		"TMPDIR=" + scratch,
-		"XDG_CACHE_HOME=" + filepath.Join(cache, "xdg"),
+		"TMPDIR=" + p.scratch,
+		"XDG_CACHE_HOME=" + filepath.Join(p.cache, "xdg"),
 	}
 	for _, variable := range spec.Env {
 		if value, ok := os.LookupEnv(variable); ok {
@@ -206,10 +277,9 @@ func (c *collector) runCommand(name string) Evidence {
 		}
 	}
 	for _, variable := range append([]string{"xdg"}, spec.Caches...) {
-		path := filepath.Join(cache, variable)
+		path := filepath.Join(p.cache, variable)
 		if err := os.MkdirAll(path, 0700); err != nil {
-			item.Error = err.Error()
-			return item
+			return result, err
 		}
 		if variable != "xdg" {
 			env = append(env, variable+"="+path)
@@ -217,15 +287,15 @@ func (c *collector) runCommand(name string) Evidence {
 	}
 
 	argv := append([]string{program}, spec.Run[1:]...)
-	if config.Sandbox {
+	if p.sandbox {
 		// The sandbox matches resolved paths (/var is /private/var on macOS),
 		// so every path in the profile must be resolved too.
 		params := []string{}
-		for _, param := range [][2]string{{"PROJECT", c.projectDir}, {"STATE", state}, {"SCRATCH", scratch}, {"CACHE", cache}, {"HOME", os.Getenv("HOME")}} {
+		for _, param := range [][2]string{{"PROJECT", p.project}, {"STATE", state}, {"SCRATCH", p.scratch}, {"CACHE", p.cache}, {"HOME", os.Getenv("HOME")}} {
 			params = append(params, "-D", param[0]+"="+resolvePath(param[1]))
 		}
 		argv = append(append([]string{sandboxExec, "-p", sandboxProfile(spec)}, params...), argv...)
-		item.Sandboxed = true
+		result.sandboxed = true
 	}
 
 	timeout := spec.Timeout
@@ -237,33 +307,28 @@ func (c *collector) runCommand(name string) Evidence {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
 	cmd.Env = env
-	out := &output{hash: sha256.New()}
-	cmd.Stdout, cmd.Stderr = out, out
+	if p.stdin != nil {
+		cmd.Stdin = bytes.NewReader(p.stdin)
+	}
+	cmd.Stdout, cmd.Stderr = p.stdout, p.stderr
 	prepareProcessGroup(cmd)
 	started := time.Now()
 	err = cmd.Run()
-	item.Duration = time.Since(started).Milliseconds()
+	result.duration = time.Since(started).Milliseconds()
 	killProcessGroup(cmd) // nothing a command started outlives it
 
 	var exitErr *exec.ExitError
 	switch {
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
-		item.TimedOut = true
-		item.ExitCode = -1
+		result.timedOut = true
+		result.exitCode = -1
 	case err == nil:
 	case errors.As(err, &exitErr):
-		item.ExitCode = exitErr.ExitCode()
+		result.exitCode = exitErr.ExitCode()
 	default:
-		item.Error = fmt.Sprintf("run %s: %v", name, err)
-		return item
+		return result, fmt.Errorf("run %s: %v", spec.Name, err)
 	}
-	item.Size = out.size
-	item.SHA256 = hex.EncodeToString(out.hash.Sum(nil))
-	kept := out.kept.Bytes()
-	item.Truncated = int64(len(kept)) < out.size
-	item.Blob = sha(kept)
-	c.blobs[item.Blob] = kept
-	return item
+	return result, nil
 }
 
 // commandVerdict turns a command_succeeds rule's command result into the

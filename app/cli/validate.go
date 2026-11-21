@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 
@@ -62,7 +63,8 @@ func runValidate(e Env, cmd *command, args []string) int {
 	exit := ExitOK
 	valid, invalid, unreadable := 0, 0, 0
 	reports := make([]validateFileJSON, 0, len(files))
-	// Inside a project, also check that commands are approved in its config.
+	// Inside a project, also check that commands are approved and reviewers
+	// configured in its config.
 	var config *backend.Config
 	var configErr error
 	if p, err := project.Find(e.Dir); err == nil {
@@ -72,12 +74,12 @@ func runValidate(e Env, cmd *command, args []string) int {
 	for _, path := range files {
 		report := validateFileJSON{Path: path, Problems: []contractfile.Problem{}}
 		result, err := contractfile.Check(resolve(e, path))
-		if err == nil && result.Valid() && usesCommands(result.Contract) {
+		if err == nil && result.Valid() && usesConfig(result.Contract) {
 			switch {
 			case configErr != nil:
 				err = configErr
 			case config != nil:
-				result.AddValidation(backend.ValidateCommands(result.Contract, *config))
+				result.AddValidation(errors.Join(backend.ValidateCommands(result.Contract, *config), backend.ValidateReviewers(result.Contract, *config)))
 			}
 		}
 		switch {
@@ -143,9 +145,11 @@ func printProblems(e Env, path string, problems []contractfile.Problem) {
 	}
 }
 
-func usesCommands(contract backend.Contract) bool {
+// usesConfig reports whether a contract depends on the project's config:
+// approved commands or reviewers.
+func usesConfig(contract backend.Contract) bool {
 	for _, rule := range contract.Rules {
-		if rule.Kind == backend.CommandSucceeds {
+		if rule.Kind == backend.CommandSucceeds || rule.Kind == backend.ReviewCheck {
 			return true
 		}
 		for _, spec := range rule.Evidence {

@@ -104,3 +104,77 @@ func TestLoadConfig(t *testing.T) {
 		t.Fatalf("invalid file: %v", err)
 	}
 }
+
+func TestParseReviewers(t *testing.T) {
+	config, problems := ParseConfig([]byte(`version: 1
+reviewers:
+  careful:
+    protocol: command
+    run: [my-reviewer, --strict]
+    timeout: 3m
+    network: on
+    env: [MY_API_KEY]
+  local:
+    protocol: command
+    run: [local-reviewer]
+    network: localhost
+default_reviewer: careful
+`))
+	if len(problems) != 0 {
+		t.Fatalf("problems: %v", problems)
+	}
+	careful := config.Reviewers["careful"]
+	if careful.Name != "careful" || careful.Protocol != backend.CommandProtocol || strings.Join(careful.Command.Run, " ") != "my-reviewer --strict" ||
+		careful.Command.Timeout != 3*time.Minute || careful.Command.Network != backend.NetworkOn || careful.Command.Env[0] != "MY_API_KEY" {
+		t.Fatalf("careful: %+v", careful)
+	}
+	if spec, err := config.Reviewer(""); err != nil || spec.Name != "careful" {
+		t.Fatalf("default: %+v %v", spec, err)
+	}
+
+	_, problems = ParseConfig([]byte(`reviewers:
+  noproto:
+    run: [x]
+  future:
+    protocol: decisions
+  norun:
+    protocol: command
+  writer:
+    protocol: command
+    run: [x]
+    writes: project
+default_reviewer: missing
+`))
+	got := make([]string, len(problems))
+	for i, p := range problems {
+		got[i] = p.String()
+	}
+	want := []string{
+		"11: unknown key \"writes\"",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("decode problems:\n%s", strings.Join(got, "\n"))
+	}
+	_, problems = ParseConfig([]byte(`reviewers:
+  noproto:
+    run: [x]
+  future:
+    protocol: decisions
+  norun:
+    protocol: command
+default_reviewer: missing
+`))
+	got = got[:0]
+	for _, p := range problems {
+		got = append(got, p.String())
+	}
+	want = []string{
+		`default_reviewer "missing" isn't one of the reviewers configured here`,
+		`reviewer "future": protocol "decisions" isn't supported by this harness; it supports: command`,
+		`reviewer "noproto": protocol is required; this harness supports: command`,
+		`reviewer "norun": run needs a program and its arguments, like [go, test, ./...]`,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("problems:\n%s", strings.Join(got, "\n"))
+	}
+}

@@ -231,3 +231,78 @@ rules:
 		t.Fatalf("missing command: %v", bad.Problems)
 	}
 }
+
+func TestReviewRules(t *testing.T) {
+	src := `version: 1
+id: docs
+name: Docs
+rules:
+  - id: install
+    criterion: README explains how to install
+    check: review
+    reviewer: careful
+    evidence:
+      - file: README.md
+  - id: tone
+    criterion: README is friendly
+    check: review
+    evidence:
+      - file: README.md
+`
+	result := Parse([]byte(src))
+	if !result.Valid() {
+		t.Fatalf("problems: %v", result.Problems)
+	}
+	rule := result.Contract.Rules[0]
+	if rule.Kind != backend.ReviewCheck || rule.Reviewer != "careful" || result.Contract.Rules[1].Reviewer != "" {
+		t.Fatalf("rules: %+v", result.Contract.Rules)
+	}
+	if data, _ := Marshal(result.Contract); string(data) != src {
+		t.Fatalf("round trip:\n%s", data)
+	}
+	changed := Parse([]byte(strings.Replace(src, "reviewer: careful", "reviewer: other", 1))).Contract
+	if backend.SameContent(result.Contract, changed) {
+		t.Fatal("a different reviewer is different content")
+	}
+
+	// Reviewers are checked against a project's config separately.
+	config := backend.DefaultConfig()
+	config.Reviewers["careful"] = backend.ReviewerSpec{Name: "careful", Protocol: backend.CommandProtocol}
+	config.Reviewers["quick"] = backend.ReviewerSpec{Name: "quick", Protocol: backend.CommandProtocol}
+	result.AddValidation(backend.ValidateReviewers(result.Contract, config))
+	if len(result.Problems) != 1 || result.Problems[0].String() != `13:5: rule "tone": the rule doesn't name a reviewer and .harness/config.yaml sets no default_reviewer` {
+		t.Fatalf("no default: %v", result.Problems)
+	}
+	config.DefaultReviewer = "quick"
+	if err := backend.ValidateReviewers(Parse([]byte(src)).Contract, config); err != nil {
+		t.Fatalf("with a default: %v", err)
+	}
+
+	bad := Parse([]byte(`id: docs
+name: Docs
+rules:
+  - id: a
+    criterion: A
+    check: review
+    path: README.md
+    reviewer: "not ok"
+  - id: b
+    criterion: B
+    check: file_exists
+    path: B.md
+    reviewer: careful
+`))
+	got := make([]string, len(bad.Problems))
+	for i, p := range bad.Problems {
+		got[i] = p.String()
+	}
+	want := []string{
+		`6:5: rule "a": a review needs evidence to judge; list what the reviewer should see under evidence`,
+		`7:5: rule "a": path isn't used by review; list files under evidence`,
+		`8:5: rule "a": reviewer "not ok" isn't a valid reviewer name (letters, digits, '.', '_', '-')`,
+		`13:5: rule "b": reviewer is only used by review`,
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("problems:\n got  %q\n want %q", got, want)
+	}
+}

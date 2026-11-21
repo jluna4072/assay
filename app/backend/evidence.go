@@ -28,6 +28,11 @@ const (
 	DiffEvidence EvidenceKind = "diff"
 	// CommandEvidence captures an approved command's output and exit status.
 	CommandEvidence EvidenceKind = "command"
+	// ReviewRequestEvidence and ReviewResponseEvidence record exactly what
+	// a reviewer was sent and what it answered. harness adds them to review
+	// rules; contracts can't ask for them.
+	ReviewRequestEvidence  EvidenceKind = "review_request"
+	ReviewResponseEvidence EvidenceKind = "review_response"
 )
 
 // MaxEvidenceBytes caps the stored content of one evidence item. Larger
@@ -57,6 +62,7 @@ type Evidence struct {
 	Files     int          `json:"files,omitempty"`    // diff: number of files changed
 	Absent    bool         `json:"absent,omitempty"`   // file: it didn't exist
 	Command   string       `json:"command,omitempty"`  // command: its name
+	Reviewer  string       `json:"reviewer,omitempty"` // review request or response: the reviewer
 	Argv      []string     `json:"argv,omitempty"`     // command: what ran
 	ExitCode  int          `json:"exitCode,omitempty"` // command: exit status
 	Duration  int64        `json:"durationMs,omitempty"`
@@ -123,8 +129,9 @@ func (c *collector) config() (Config, error) {
 	return c.loadedConfig, c.configErr
 }
 
-// scratchDir returns an empty directory for one command in this attempt.
-func (c *collector) scratchDir(name string) (string, error) {
+// scratchDir returns an empty directory for one command or reviewer
+// (kind) in this attempt.
+func (c *collector) scratchDir(kind, name string) (string, error) {
 	if c.scratch == "" {
 		base := filepath.Join(c.projectDir, ".harness", "tmp")
 		if err := os.MkdirAll(base, 0700); err != nil {
@@ -136,8 +143,8 @@ func (c *collector) scratchDir(name string) (string, error) {
 		}
 		c.scratch = dir
 	}
-	dir := filepath.Join(c.scratch, name)
-	return dir, os.MkdirAll(dir, 0700)
+	dir, err := os.MkdirTemp(c.scratch, kind+"-"+name+"-")
+	return dir, err
 }
 
 // cleanup removes this attempt's scratch directories. Caches stay.

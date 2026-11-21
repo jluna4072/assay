@@ -35,6 +35,7 @@ type fileRule struct {
 	Check     string         `yaml:"check"`
 	Path      string         `yaml:"path"`
 	Command   string         `yaml:"command"`
+	Reviewer  string         `yaml:"reviewer"`
 	DependsOn []string       `yaml:"depends_on"`
 	Evidence  []fileEvidence `yaml:"evidence"`
 }
@@ -180,7 +181,7 @@ func Parse(data []byte) Result {
 	for i, rule := range file.Rules {
 		result.Contract.Rules[i] = backend.Rule{
 			ID: rule.ID, Criterion: rule.Criterion, Kind: backend.RuleKind(rule.Check),
-			Path: rule.Path, Command: rule.Command, DependsOn: rule.DependsOn,
+			Path: rule.Path, Command: rule.Command, Reviewer: rule.Reviewer, DependsOn: rule.DependsOn,
 		}
 		for j, item := range rule.Evidence {
 			set := 0
@@ -373,7 +374,7 @@ func Marshal(contract backend.Contract) ([]byte, error) {
 		Rules   []marshalledRule `yaml:"rules"`
 	}{Version: version, ID: contract.ID, Name: contract.Name, Rules: make([]marshalledRule, len(contract.Rules))}
 	for i, rule := range contract.Rules {
-		file.Rules[i] = marshalledRule{ID: rule.ID, Criterion: rule.Criterion, Check: string(rule.Kind), Path: rule.Path, Command: rule.Command, DependsOn: rule.DependsOn}
+		file.Rules[i] = marshalledRule{ID: rule.ID, Criterion: rule.Criterion, Check: string(rule.Kind), Path: rule.Path, Command: rule.Command, Reviewer: rule.Reviewer, DependsOn: rule.DependsOn}
 		for _, spec := range rule.Evidence {
 			switch spec.Kind {
 			case backend.FileEvidence:
@@ -405,6 +406,7 @@ type marshalledRule struct {
 	Check     string         `yaml:"check"`
 	Path      string         `yaml:"path,omitempty"`
 	Command   string         `yaml:"command,omitempty"`
+	Reviewer  string         `yaml:"reviewer,omitempty"`
 	DependsOn []string       `yaml:"depends_on,omitempty,flow"`
 	Evidence  []fileEvidence `yaml:"evidence,omitempty"`
 }
