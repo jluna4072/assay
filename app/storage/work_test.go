@@ -221,3 +221,100 @@ true`
 		}
 	}
 }
+
+func TestWorkResume(t *testing.T) {
+	dir, s := workProject(t)
+	config := workConfig(false, map[string]string{"fixer": fixesOnRepair, "never": `cat >/dev/null; echo "# Project" > README.md`})
+	s.LoadConfig = func(string) (backend.Config, error) { return config, nil }
+
+	// Cancel the first attempt as soon as the worker starts talking.
+	ctx, cancel := context.WithCancel(context.Background())
+	run, err := s.Work(ctx, backend.WorkOptions{ContractID: "task", Version: 1, ProjectDir: dir, Task: "Add a README and mark it done", Worker: "fixer"}, func(e backend.Event) {
+		if e.Type == backend.EventWorkerOutput {
+			cancel()
+		}
+	})
+	if err != nil || run.Work.Outcome != backend.WorkCancelled {
+		t.Fatalf("cancel: %v %+v", err, run.Work)
+	}
+	runStores[run.ID] = runStores["work:"+dir]
+
+	// Resuming continues numbering; with no checked attempt yet, the prompt
+	// has no failures, and attempt 3 gets attempt 2's.
+	run, err = s.ResumeWork(context.Background(), backend.ResumeOptions{RunID: run.ID}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Work.Outcome != backend.WorkAccepted || run.Work.Reason != "every rule passed on attempt 3" || len(run.Attempts) != 3 || run.Attempts[0].Status != backend.Cancelled {
+		t.Fatalf("resumed: %+v, %d attempts", run.Work, len(run.Attempts))
+	}
+	if prompt := string(mustBlob(t, run, run.Attempts[1].Worker.Prompt)); strings.Contains(prompt, "previous attempt") || !strings.Contains(prompt, "attempt 2 of 3") {
+		t.Fatalf("attempt 2 prompt:\n%s", prompt)
+	}
+	if prompt := string(mustBlob(t, run, run.Attempts[2].Worker.Prompt)); !strings.Contains(prompt, "doesn't say done") {
+		t.Fatalf("attempt 3 prompt lacks attempt 2's failure:\n%s", prompt)
+	}
+	if _, err := s.ResumeWork(context.Background(), backend.ResumeOptions{RunID: run.ID}, nil); err == nil || !strings.Contains(err.Error(), "was accepted") {
+		t.Fatalf("resume accepted: %v", err)
+	}
+
+	// A rejected run resumes only with more attempts, and the repair prompt
+	// comes from its last checked attempt (loaded from the database).
+	rejected, _ := work(t, dir, s, config, "never", 1, time.Minute)
+	if _, err := s.ResumeWork(context.Background(), backend.ResumeOptions{RunID: rejected.ID}, nil); err == nil || !strings.Contains(err.Error(), "used all 1 of its attempts") {
+		t.Fatalf("resume without more attempts: %v", err)
+	}
+	config.Workers["never"] = config.Workers["fixer"] // the worker gets better
+	resumed, err := s.ResumeWork(context.Background(), backend.ResumeOptions{RunID: rejected.ID, MaxAttempts: 2}, nil)
+	if err != nil || resumed.Work.Outcome != backend.WorkAccepted || resumed.Work.MaxAttempts != 2 || len(resumed.Attempts) != 2 {
+		t.Fatalf("resume with more attempts: %v %+v", err, resumed.Work)
+	}
+	if prompt := string(mustBlob(t, resumed, resumed.Attempts[1].Worker.Prompt)); !strings.Contains(prompt, "doesn't say done") {
+		t.Fatalf("resumed repair prompt:\n%s", prompt)
+	}
+}
+
+func TestCleanWorkspaces(t *testing.T) {
+	dir, s := workProject(t)
+	config := workConfig(false, map[string]string{"never": `cat >/dev/null; echo "# Project" > README.md`})
+	first, _ := work(t, dir, s, config, "never", 1, time.Minute)
+	second, _ := work(t, dir, s, config, "never", 1, time.Minute)
+
+	// An edit after the run keeps a workspace unless forced.
+	os.WriteFile(filepath.Join(second.Work.Workspace, "notes.txt"), []byte("mine\n"), 0644)
+	results, err := s.CleanWorkspaces("", false)
+	if err != nil || len(results) != 2 {
+		t.Fatalf("clean: %v %+v", err, results)
+	}
+	for _, status := range results {
+		switch status.Run.ID {
+		case first.ID:
+			if !status.Removed {
+				t.Errorf("first: %+v", status)
+			}
+		case second.ID:
+			if status.Removed || !strings.Contains(status.Skipped, "use --force") {
+				t.Errorf("second: %+v", status)
+			}
+		}
+	}
+	if _, err := os.Stat(first.Work.Workspace); err == nil {
+		t.Fatal("the first workspace is still there")
+	}
+	if out, err := exec.Command("git", "-C", dir, "rev-parse", "--verify", "--quiet", first.Work.Branch).Output(); err != nil || len(out) == 0 {
+		t.Fatal("cleaning removed the branch")
+	}
+	if results, _ := s.CleanWorkspaces(second.ID, true); len(results) != 1 || !results[0].Removed {
+		t.Fatalf("forced: %+v", results)
+	}
+
+	// A cleaned run can still be resumed: its workspace comes back from the
+	// branch, with the earlier attempt's commit.
+	resumed, err := s.ResumeWork(context.Background(), backend.ResumeOptions{RunID: first.ID, MaxAttempts: 2}, nil)
+	if err != nil || len(resumed.Attempts) != 2 {
+		t.Fatalf("resume after clean: %v %+v", err, resumed.Work)
+	}
+	if _, err := os.Stat(filepath.Join(first.Work.Workspace, "README.md")); err != nil {
+		t.Fatalf("recreated workspace lacks the committed README: %v", err)
+	}
+}

@@ -16,7 +16,7 @@ import (
 
 var workCommand = command{
 	name:    "work",
-	args:    "<id>[@version] --task <text>",
+	args:    "<id>[@version] --task <text> | --resume <run>",
 	summary: "Have a worker do a task, checking and retrying until every rule passes",
 	details: `
 Makes a workspace (a git worktree of the last commit, on a new branch),
@@ -34,12 +34,19 @@ workspace.
 Progress goes to stderr; the result goes to stdout. Ctrl-C stops the
 worker, records the attempt as cancelled, and keeps the workspace.
 
+--resume continues a run that wasn't accepted (cancelled, timed out, or
+stopped by an error; or rejected, with a higher --max-attempts) in the
+same workspace and branch, telling the worker what failed last.
+
 Flags:
   --task <text>         What the worker should do (or --task-file)
   --task-file <path>    Read the task from a file ("-" for stdin)
   --worker <name>       Worker to use (default: default_worker)
   --max-attempts <n>    Stop after n attempts (default 3)
   --timeout <duration>  Stop after this long in all (default 30m)
+  --resume <run>        Continue a run that wasn't accepted; --max-attempts
+                        then counts its earlier attempts, and --timeout
+                        starts now
   --quiet               Don't print the worker's output
   --json                Print the run as one JSON object instead of text
 ` + projectFlagHelp + `
@@ -58,11 +65,29 @@ func runWork(e Env, cmd *command, args []string) int {
 	task := fs.String("task", "", "")
 	taskFile := fs.String("task-file", "", "")
 	worker := fs.String("worker", "", "")
-	maxAttempts := fs.Int("max-attempts", backend.DefaultMaxAttempts, "")
-	timeout := fs.Duration("timeout", backend.DefaultWorkTimeout, "")
+	maxAttempts := fs.Int("max-attempts", 0, "")
+	timeout := fs.Duration("timeout", 0, "")
+	resume := fs.String("resume", "", "")
 	refs, code, ok := parseFlags(e, cmd, fs, args)
 	if !ok {
 		return code
+	}
+	if *maxAttempts < 0 || *timeout < 0 || (*timeout > 0 && *timeout < time.Second) {
+		fmt.Fprintln(e.Stderr, "harness work: --max-attempts must be at least 1 and --timeout at least 1s")
+		return ExitUsage
+	}
+	if *resume != "" {
+		if len(refs) > 0 || *task != "" || *taskFile != "" || *worker != "" {
+			fmt.Fprintln(e.Stderr, "harness work: --resume continues a run with its own contract, task, and worker; give only the run and limits")
+			return ExitUsage
+		}
+		return resumeWork(e, cmd, *projectDir, *resume, *maxAttempts, *timeout, *quiet, *asJSON)
+	}
+	if *maxAttempts == 0 {
+		*maxAttempts = backend.DefaultMaxAttempts
+	}
+	if *timeout == 0 {
+		*timeout = backend.DefaultWorkTimeout
 	}
 	if len(refs) != 1 {
 		fmt.Fprintln(e.Stderr, "harness work: name exactly one contract, like docs or docs@2")
@@ -91,10 +116,6 @@ func runWork(e Env, cmd *command, args []string) int {
 		fmt.Fprintln(e.Stderr, "harness work: say what to do with --task \"...\" or --task-file <path>")
 		return ExitUsage
 	}
-	if *maxAttempts < 1 || *timeout < time.Second {
-		fmt.Fprintln(e.Stderr, "harness work: --max-attempts must be at least 1 and --timeout at least 1s")
-		return ExitUsage
-	}
 	id, version, err := parseRef(refs[0])
 	if err != nil {
 		fmt.Fprintf(e.Stderr, "harness work: %v\n", err)
@@ -113,11 +134,7 @@ func runWork(e Env, cmd *command, args []string) int {
 		return code
 	}
 
-	ctx := e.Context
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
+	ctx, stop := interruptible(e)
 	defer stop()
 	printer := &workPrinter{w: e.Stderr, root: s.project.Root, quiet: *quiet}
 	run, err := s.service.Work(ctx, backend.WorkOptions{
@@ -128,7 +145,44 @@ func runWork(e Env, cmd *command, args []string) int {
 		fmt.Fprintf(e.Stderr, "harness work: %v\n", err)
 		return ExitOperational
 	}
-	if *asJSON {
+	return finishWork(e, s, run, *asJSON)
+}
+
+// interruptible returns a context Ctrl-C cancels.
+func interruptible(e Env) (context.Context, context.CancelFunc) {
+	ctx := e.Context
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return signal.NotifyContext(ctx, os.Interrupt)
+}
+
+func resumeWork(e Env, cmd *command, projectDir, prefix string, maxAttempts int, timeout time.Duration, quiet, asJSON bool) int {
+	s, code := openProject(e, cmd, projectDir)
+	if s == nil {
+		return code
+	}
+	defer s.Close()
+	if asJSON {
+		s.service.Keys = newKeys(e, false)
+	}
+	run, code := findRun(e, cmd, s, prefix)
+	if code != ExitOK {
+		return code
+	}
+	ctx, stop := interruptible(e)
+	defer stop()
+	printer := &workPrinter{w: e.Stderr, root: s.project.Root, quiet: quiet, resumed: true}
+	run, err := s.service.ResumeWork(ctx, backend.ResumeOptions{RunID: run.ID, MaxAttempts: maxAttempts, Timeout: timeout}, printer.event)
+	if err != nil {
+		fmt.Fprintf(e.Stderr, "harness work: %v\n", err)
+		return ExitUsage
+	}
+	return finishWork(e, s, run, asJSON)
+}
+
+func finishWork(e Env, s *session, run backend.Run, asJSON bool) int {
+	if asJSON {
 		writeJSON(e.Stdout, struct {
 			Schema int     `json:"schema"`
 			Run    runJSON `json:"run"`
@@ -151,16 +205,21 @@ func workExit(outcome backend.WorkOutcome) int {
 
 // workPrinter prints a work run's progress.
 type workPrinter struct {
-	w     io.Writer
-	root  string
-	quiet bool
+	w       io.Writer
+	root    string
+	quiet   bool
+	resumed bool
 }
 
 func (p *workPrinter) event(event backend.Event) {
 	run := event.Run
 	switch event.Type {
 	case backend.EventRunStarted:
-		fmt.Fprintf(p.w, "work %s@%d · run %s · worker %s\n", run.ContractID, run.Version, shortID(run.ID), run.Work.Worker)
+		verb := "work"
+		if p.resumed {
+			verb = fmt.Sprintf("resuming after attempt %d ·", len(run.Attempts))
+		}
+		fmt.Fprintf(p.w, "%s %s@%d · run %s · worker %s\n", verb, run.ContractID, run.Version, shortID(run.ID), run.Work.Worker)
 		fmt.Fprintf(p.w, "workspace %s · branch %s\n", relative(p.root, run.Work.Workspace), run.Work.Branch)
 	case backend.EventRunFinished:
 		fmt.Fprintln(p.w)
@@ -217,8 +276,10 @@ func printWorkResult(w io.Writer, run backend.Run, root string) {
 	switch work.Outcome {
 	case backend.WorkAccepted:
 		fmt.Fprintf(w, "Review the changes with: git diff %s...%s\nThen merge the branch yourself; harness never merges.\n", shortCommit(run.Baseline), work.Branch)
+	case backend.WorkRejected:
+		fmt.Fprintf(w, "See every attempt with: harness show %s\nAllow more attempts with: harness work --resume %s --max-attempts %d\n", shortID(run.ID), shortID(run.ID), work.MaxAttempts+2)
 	default:
-		fmt.Fprintf(w, "See every attempt with: harness show %s\n", shortID(run.ID))
+		fmt.Fprintf(w, "See every attempt with: harness show %s\nContinue with: harness work --resume %s\n", shortID(run.ID), shortID(run.ID))
 	}
 }
 

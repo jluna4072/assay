@@ -479,6 +479,8 @@ Then merge the branch yourself; harness never merges.
 
 harness never merges the branch. Review it (`git diff <start>...harness/<run>`) and merge it yourself. Progress, including the worker's output (`--quiet` hides it), goes to stderr; the result goes to stdout, or one JSON object with `--json`. `--task-file <path>` reads the task from a file (`-` for stdin), and `--worker <name>` picks a worker.
 
+A run that wasn't accepted can be continued with `harness work --resume <run>`: after Ctrl-C, a time limit, or a worker error, or, with a higher `--max-attempts` (which counts the earlier attempts), after it was rejected. It uses the same workspace and branch, numbers attempts after the earlier ones, and tells the worker what failed in the last checked attempt. `--timeout` starts again from the resume.
+
 `harness show` prints a work run's task, worker, outcome, branch, and each attempt's worker line. `harness evidence [run] --prompt` prints exactly what the worker was told in an attempt (`--attempt <n>`), and `--output` what it printed.
 
 ### Workers
@@ -499,6 +501,27 @@ default_worker: agent         # needed only with more than one worker
 With `sandbox: on`, a worker runs under the macOS sandbox like an approved command: it can write only in its workspace, a scratch directory, and its caches, never to your checkout or harness's state; it reads no credentials; and its network is limited by `network`. Because the workspace's git data lives in your repository's `.git`, a sandboxed worker can read git history but can't commit; harness commits for it.
 
 macOS sandboxes can't be nested, so a worker that sandboxes itself (Codex does) needs `sandbox: off`, and is then only as contained as its own sandbox makes it. Attempts by unsandboxed workers are marked `unsandboxed`.
+
+#### Codex
+
+[Codex CLI](https://github.com/openai/codex) works as a worker: `codex exec -` reads the prompt from stdin and works in the current directory.
+
+```yaml
+workers:
+  codex:
+    run: [codex, exec, --sandbox, workspace-write, --ephemeral, --color, never, "-"]
+    timeout: 20m
+    sandbox: off   # Codex applies its own sandbox: writes only in the workspace and temp directories
+```
+
+- `--sandbox workspace-write` lets Codex's commands write only in the workspace and temporary directories. Network access for those commands is off unless your Codex config turns it on; Codex itself still reaches its model.
+- `--ephemeral` keeps Codex from saving a session for every attempt. harness records the prompt and output itself.
+- Codex uses its own login and `~/.codex/config.toml`, including the model. Add `-m <model>` to `run` to pick one for harness, such as a cheaper model for routine tasks (`-m gpt-6-luna`). Check that `codex exec "say hi"` works on its own first: a Codex error ends the run as `error`, with the message in the worker's output.
+- Codex can't commit in the workspace (the workspace's git data is in your repository's `.git`, outside its sandbox); harness commits each attempt.
+
+### `harness workspace list` and `harness workspace clean [run]`
+
+`list` shows work runs with their outcome, branch, and whether the workspace is still on disk. `clean` removes the workspaces of finished runs (or of the run named); branches are kept, and a cleaned run can still be resumed, which recreates its workspace from the branch. A workspace with uncommitted changes, such as edits you made while reviewing, is skipped unless you pass `--force`. Runs in progress are always skipped.
 
 ### `harness recheck [run]`
 

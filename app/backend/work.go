@@ -210,30 +210,33 @@ func (s *Service) Work(ctx context.Context, options WorkOptions, events func(Eve
 		return Run{}, err
 	}
 	emit(Event{Type: EventRunStarted, Run: &run})
+	return s.workLoop(ctx, store, run, published.Contract, worker, config, nil, options.Timeout, emit), nil
+}
 
-	deadline := started.Add(options.Timeout)
-	finish := func(outcome WorkOutcome, reason string) (Run, error) {
+// workLoop runs attempts until the run is accepted or a limit is reached,
+// continuing after the run's existing attempts. previous is the last
+// checked attempt, with its evidence content, for the repair prompt.
+func (s *Service) workLoop(ctx context.Context, store RunRepository, run Run, contract Contract, worker WorkerSpec, config Config, previous *Attempt, timeout time.Duration, emit func(Event)) Run {
+	deadline := time.Now().Add(timeout)
+	finish := func(outcome WorkOutcome, reason string) Run {
 		finished := time.Now().UTC()
 		run.Work.Outcome, run.Work.Reason, run.Work.FinishedAt = outcome, reason, &finished
 		if err := store.UpdateWork(run.ID, *run.Work); err != nil {
-			return run, err
-		}
-		latest, err := store.GetRun(run.ID)
-		if err == nil {
+			run.Work.Outcome, run.Work.Reason = WorkError, fmt.Sprintf("%s, but recording that failed: %v", reason, err)
+		} else if latest, err := store.GetRun(run.ID); err == nil {
 			run = latest
 		}
 		emit(Event{Type: EventRunFinished, Run: &run})
-		return run, nil
+		return run
 	}
 
-	var previous *Attempt
-	for number := 1; number <= options.MaxAttempts; number++ {
+	for number := len(run.Attempts) + 1; number <= run.Work.MaxAttempts; number++ {
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
-			return finish(WorkTimedOut, fmt.Sprintf("the %s time limit was reached before attempt %d", options.Timeout, number))
+			return finish(WorkTimedOut, fmt.Sprintf("the %s time limit was reached before attempt %d", timeout, number))
 		}
 		emit(Event{Type: EventAttemptStarted, Run: &run, Attempt: number})
-		prompt := workPrompt(published.Contract, run, options.Task, number, previous)
+		prompt := workPrompt(contract, run, run.Work.Task, number, previous)
 		record, blobs := s.runWorker(ctx, worker, config, run, number, prompt, remaining, func(line string) {
 			emit(Event{Type: EventWorkerOutput, Run: &run, Attempt: number, Line: line})
 		})
@@ -244,12 +247,13 @@ func (s *Service) Work(ctx context.Context, options WorkOptions, events func(Eve
 			now := time.Now().UTC()
 			attempt = Attempt{StartedAt: now, CompletedAt: now, Status: Cancelled, Results: []RuleResult{}}
 		} else {
+			var err error
 			attempt, err = s.evaluate(run)
 			if err != nil {
 				return finish(WorkError, fmt.Sprintf("checking attempt %d failed: %v", number, err))
 			}
 		}
-		if commit, err := commitWorkspace(workspace, run.ID, number); err != nil {
+		if commit, err := commitWorkspace(run.Work.Workspace, run.ID, number); err != nil {
 			record.Error = strings.TrimSpace(record.Error + " " + fmt.Sprintf("commit the workspace: %v", err))
 		} else {
 			record.Commit = commit
@@ -282,7 +286,181 @@ func (s *Service) Work(ctx context.Context, options WorkOptions, events func(Eve
 		}
 		previous = &latest
 	}
-	return finish(WorkRejected, fmt.Sprintf("rules still failed after %d attempts", options.MaxAttempts))
+	return finish(WorkRejected, fmt.Sprintf("rules still failed after %d attempts", run.Work.MaxAttempts))
+}
+
+// ResumeOptions continues a work run.
+type ResumeOptions struct {
+	RunID       string
+	MaxAttempts int           // total attempts allowed, counting earlier ones; 0 keeps the run's limit
+	Timeout     time.Duration // time allowed from now; 0 uses the run's limit
+}
+
+// ResumeWork continues a work run that wasn't accepted: after Ctrl-C, a
+// time limit, a worker error, or, with a higher MaxAttempts, the attempt
+// limit. It uses the same workspace and branch, recreating the workspace
+// from the branch if it was cleaned up, and tells the worker what failed
+// in the last checked attempt.
+func (s *Service) ResumeWork(ctx context.Context, options ResumeOptions, events func(Event)) (Run, error) {
+	emit := func(e Event) {
+		if events != nil {
+			e.Time = time.Now().UTC()
+			events(e)
+		}
+	}
+	store, err := s.runRepository()
+	if err != nil {
+		return Run{}, err
+	}
+	run, err := store.GetRun(options.RunID)
+	if err != nil {
+		return Run{}, err
+	}
+	if run.Work == nil {
+		return Run{}, fmt.Errorf("run %s wasn't made by \"harness work\", so there's nothing to resume", strings.ToLower(run.ID))
+	}
+	if run.Work.Outcome == WorkAccepted {
+		return Run{}, fmt.Errorf("run %s was accepted; there's nothing to resume", strings.ToLower(run.ID))
+	}
+	if options.MaxAttempts > 0 {
+		run.Work.MaxAttempts = options.MaxAttempts
+	}
+	if len(run.Attempts) >= run.Work.MaxAttempts {
+		return Run{}, fmt.Errorf("run %s has used all %d of its attempts; allow more with a higher --max-attempts", strings.ToLower(run.ID), run.Work.MaxAttempts)
+	}
+	timeout := options.Timeout
+	if timeout <= 0 {
+		timeout = time.Duration(run.Work.Timeout) * time.Millisecond
+	}
+	if timeout <= 0 {
+		timeout = DefaultWorkTimeout
+	}
+	published, err := store.GetVersion(run.ContractID, run.Version)
+	if err != nil {
+		return Run{}, err
+	}
+	config := DefaultConfig()
+	if s.LoadConfig != nil {
+		if config, err = s.LoadConfig(run.ProjectDir); err != nil {
+			return Run{}, err
+		}
+	}
+	worker, err := config.Worker(run.Work.Worker)
+	if err != nil {
+		return Run{}, err
+	}
+	if err := ensureWorkspace(run); err != nil {
+		return Run{}, err
+	}
+
+	// The repair prompt describes the last attempt that was checked.
+	var previous *Attempt
+	for i := len(run.Attempts) - 1; i >= 0; i-- {
+		if run.Attempts[i].Status == Cancelled {
+			continue
+		}
+		attempt := run.Attempts[i]
+		attempt.Blobs = map[string][]byte{}
+		for _, result := range attempt.Results {
+			for _, item := range result.Evidence {
+				if item.Kind == CommandEvidence && item.Blob != "" {
+					if data, err := store.GetBlob(item.Blob); err == nil {
+						attempt.Blobs[item.Blob] = data
+					}
+				}
+			}
+		}
+		previous = &attempt
+		break
+	}
+
+	run.Work.Outcome, run.Work.Reason, run.Work.FinishedAt, run.Work.Timeout = WorkRunning, "", nil, timeout.Milliseconds()
+	if err := store.UpdateWork(run.ID, *run.Work); err != nil {
+		return Run{}, err
+	}
+	emit(Event{Type: EventRunStarted, Run: &run})
+	return s.workLoop(ctx, store, run, published.Contract, worker, config, previous, timeout, emit), nil
+}
+
+// ensureWorkspace recreates a work run's workspace from its branch if it
+// was removed.
+func ensureWorkspace(run Run) error {
+	if info, err := os.Stat(run.Work.Workspace); err == nil && info.IsDir() {
+		return nil
+	}
+	git(run.ProjectDir, nil, "worktree", "prune")
+	if _, err := git(run.ProjectDir, nil, "worktree", "add", "--quiet", run.Work.Workspace, run.Work.Branch); err != nil {
+		return fmt.Errorf("recreate the workspace from branch %s: %v", run.Work.Branch, err)
+	}
+	return nil
+}
+
+// WorkspaceStatus describes a work run's workspace.
+type WorkspaceStatus struct {
+	Run     Run
+	Exists  bool
+	Removed bool   // removed by CleanWorkspaces
+	Skipped string // why it wasn't removed
+}
+
+// Workspaces lists work runs' workspaces, newest first.
+func (s *Service) Workspaces() ([]WorkspaceStatus, error) {
+	store, err := s.runRepository()
+	if err != nil {
+		return nil, err
+	}
+	runs, err := store.ListRuns()
+	if err != nil {
+		return nil, err
+	}
+	var list []WorkspaceStatus
+	for _, run := range runs {
+		if run.Work == nil {
+			continue
+		}
+		info, err := os.Stat(run.Work.Workspace)
+		list = append(list, WorkspaceStatus{Run: run, Exists: err == nil && info.IsDir()})
+	}
+	return list, nil
+}
+
+// CleanWorkspaces removes the workspaces of finished work runs, or of the
+// one run named. Branches are kept: they hold every attempt's commit, and
+// a cleaned run can still be resumed. A workspace with changes that aren't
+// committed is skipped unless force is set.
+func (s *Service) CleanWorkspaces(runID string, force bool) ([]WorkspaceStatus, error) {
+	list, err := s.Workspaces()
+	if err != nil {
+		return nil, err
+	}
+	var result []WorkspaceStatus
+	for _, status := range list {
+		if runID != "" && status.Run.ID != runID {
+			continue
+		}
+		if !status.Exists {
+			continue
+		}
+		if status.Run.Work.Outcome == WorkRunning {
+			status.Skipped = "it's still running"
+			result = append(result, status)
+			continue
+		}
+		args := []string{"worktree", "remove"}
+		if force {
+			args = append(args, "--force")
+		}
+		if _, err := git(status.Run.ProjectDir, nil, append(args, status.Run.Work.Workspace)...); err != nil {
+			status.Skipped = err.Error()
+			if strings.Contains(err.Error(), "modified or untracked") {
+				status.Skipped = "it has changes that aren't committed; use --force to remove it anyway"
+			}
+		} else {
+			status.Removed, status.Exists = true, false
+		}
+		result = append(result, status)
+	}
+	return result, nil
 }
 
 // runWorker runs the worker once in the workspace with prompt on stdin,

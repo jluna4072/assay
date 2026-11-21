@@ -84,6 +84,8 @@ var commands = []command{
 	graphCommand,
 	checkCommand,
 	workCommand,
+	workspaceListCommand,
+	workspaceCleanCommand,
 	recheckCommand,
 	runsCommand,
 	showRunCommand,
