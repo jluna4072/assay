@@ -72,7 +72,11 @@ func runUI(e Env, cmd *command, args []string) int {
 			return code
 		}
 		model = newUIModel(&uiData{s: s}, tabRuns)
-		page, err := model.data.runPage(run.ID)
+		open := model.data.runPage
+		if run.Work != nil {
+			open = model.data.workPage
+		}
+		page, err := open(run.ID)
 		if err != nil {
 			fmt.Fprintf(e.Stderr, "assay ui: %v\n", err)
 			return ExitOperational

@@ -648,7 +648,8 @@ A full-screen view of the project for browsing what assay has recorded. Running 
 It opens with a welcome panel: the assay logo in large letters (in terminals at least 24 rows tall), the version, the project, and a count of contract files, published contracts, and runs with how the last run went. The panel goes away once you open something or switch tabs, and isn't shown in terminals shorter than 20 rows or when opening a run directly.
 
 - **Contracts** lists the YAML files in `assay/` (✓ valid, ✗ with problems), each with whether it's published as is, changed since its latest version, or not published, then the published contracts. Open a file to see its problems or its rules; open a published contract to see its versions, its runs, and the dependency tree of its rules.
-- **Runs** lists runs newest first, as `assay runs` does. Open a run to see its attempts (newest first), each attempt's worker for work runs, and every rule's result; open a result to see its reason, the review, and the content of each evidence item, or a worker line to see its prompt and output.
+- **Runs** lists runs newest first, as `assay runs` does, and keeps itself up to date while a work run is going. Open a run to see its attempts (newest first) and every rule's result; open a result to see its reason, the review, and the content of each evidence item.
+- **Work** is what a work run opens to. It shows the run's state, the attempt it's on out of its limit, and the time used, then either its **log** (what `assay show --follow` prints: each attempt, the worker's output as it arrives, and the results) or its **results** (the attempts as above, plus each attempt's worker line, which opens its prompt and output); `tab` switches between them. The log stays scrolled to its end until you scroll up. It follows a run started anywhere: in this window, by `assay work` in another terminal, or by an agent, reading the run's stored events about twice a second.
 
 Keys: `↑`/`↓` (or `k`/`j`) move, `enter` opens, `esc` goes back, `tab` (or `1`/`2`) switches between Contracts and Runs, `pgup`/`pgdn` and `home`/`end` scroll, `ctrl+r` reloads from the database, `?` lists the keys, `q` quits from a list, `ctrl+c` quits from anywhere.
 
@@ -661,8 +662,10 @@ Actions apply to what's selected (or the page you're on), and the key line lists
 | `e` | a contract file | opens it in `$VISUAL` or `$EDITOR` (which may include arguments, like `code --wait`), or `vi`, and validates it when the editor closes |
 | `c` | a published contract or version | starts a run and checks the project, as `assay check` does, then opens the run |
 | `r` | a run | adds an attempt, as `assay recheck` does |
+| `w` | a published contract or version, or a run | asks for a task and starts `assay work` with it (on a run, on the run's contract and version), with the default limits; `tab` in the form picks another configured worker. It opens the run's Work page |
+| `x` | a work run started in this window | cancels it after asking; the run ends as cancelled |
 
-Checks run in the background while you keep browsing; one runs at a time, and quitting while one runs abandons it without recording an attempt. A reviewer with no API key reports the error in the result instead of asking for the key, since the screen belongs to the UI; save keys with `assay reviewer login` first. Work runs are started with `assay work`.
+Checks and work run in the background while you keep browsing; one check and one work run at a time. Quitting while a check runs abandons it without recording an attempt. Quitting while work started in this window runs asks first (`y`, or `ctrl+c` again), then cancels the run and waits for it to record that; one more `ctrl+c` stops waiting. Work started elsewhere keeps running; stop it where it was started. For other limits, a task file, or `--resume`, use `assay work`. A reviewer with no API key reports the error in the result instead of asking for the key, since the screen belongs to the UI; save keys with `assay reviewer login` first.
 
 The UI follows `NO_COLOR`, works in an 80×24 terminal, and restores the terminal when it exits.
 

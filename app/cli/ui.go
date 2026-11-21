@@ -18,6 +18,8 @@ type uiRow struct {
 	text   string // may hold styling
 	open   func() (*uiPage, error)
 	target uiTarget // what actions on this row act on
+	input  bool     // draws the task form's text box
+	worker bool     // draws the task form's worker choice
 }
 
 // uiTarget is what a row or page is about, for the actions that act on
@@ -40,6 +42,11 @@ type uiPage struct {
 	// target is what the page is about, for actions when the selected row
 	// isn't about anything.
 	target uiTarget
+	// active is set on a list that shows a running work run, so it reloads
+	// itself until the run ends.
+	active bool
+	// live is set on a Work page.
+	live *uiLive
 }
 
 func (p *uiPage) about(target uiTarget) *uiPage {
@@ -85,6 +92,12 @@ type uiModel struct {
 	// confirm is the question the current page asks, such as whether to
 	// publish the diff it shows.
 	confirm *uiConfirm
+	task    *uiTask // the open task form, which takes the keys
+	work    *uiWork // the work run this UI started, while it runs
+	// quitting is set once the person chose to quit while work runs; the
+	// UI quits when the run has recorded its cancellation.
+	quitting bool
+	ticking  bool // a poll is scheduled
 	// welcome is the panel shown when the UI opens, until the first time
 	// something is opened or the tab changes.
 	welcome *uiWelcome
@@ -174,18 +187,30 @@ func (m *uiModel) page() *uiPage { return m.stack[len(m.stack)-1] }
 func (m *uiModel) Init() tea.Cmd { return nil }
 
 func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.keepVisible()
+		m.followLog()
 	case tea.KeyPressMsg:
-		return m, m.key(msg.String())
+		if m.task != nil {
+			cmd = m.taskKey(msg)
+		} else {
+			cmd = m.key(msg.String())
+		}
 	case uiDoneMsg:
 		m.done(msg)
 	case uiEditedMsg:
 		m.edited(msg)
+	case uiWorkStartedMsg:
+		cmd = m.workStarted(msg)
+	case uiWorkFinishedMsg:
+		cmd = m.workFinished(msg)
+	case uiTickMsg:
+		m.ticked()
 	}
-	return m, nil
+	return m, tea.Batch(cmd, m.tick())
 }
 
 // bodyHeight is the number of rows a page has room for: the screen less
@@ -200,7 +225,11 @@ func (m *uiModel) bodyHeight() int {
 
 func (m *uiModel) key(key string) tea.Cmd {
 	if key == "ctrl+c" {
-		return tea.Quit
+		if m.confirm != nil && m.confirm.quit {
+			return m.answer("y")
+		}
+		m.confirm, m.help = nil, false
+		return m.quit()
 	}
 	if m.help {
 		switch key {
@@ -220,13 +249,20 @@ func (m *uiModel) key(key string) tea.Cmd {
 	case "q", "esc", "left", "h", "backspace":
 		if len(m.stack) == 1 {
 			if key == "q" || key == "esc" {
-				return tea.Quit
+				return m.quit()
 			}
 			return nil
 		}
 		m.stack = m.stack[:len(m.stack)-1]
 		m.reload() // an action may have changed what the page shows
 	case "tab", "shift+tab":
+		if p.live != nil {
+			p.live.results = !p.live.results
+			p.offset = 0
+			m.data.drawWork(p)
+			m.followLog()
+			return nil
+		}
 		m.welcome = nil
 		m.tab = (m.tab + 1) % len(tabNames)
 		m.stack = []*uiPage{m.topPage()}
@@ -249,6 +285,15 @@ func (m *uiModel) key(key string) tea.Cmd {
 		m.reload()
 	case "v", "p", "e", "c", "r":
 		return m.act(key)
+	case "w":
+		t := m.target()
+		if t.contract == "" && t.run == "" {
+			m.status = "w starts work on a published contract: select one, or a run to work on its contract again"
+			return nil
+		}
+		return m.startWork(t)
+	case "x":
+		m.cancelWork(m.target())
 	case "down", "j":
 		m.move(1)
 	case "up", "k":
@@ -260,11 +305,14 @@ func (m *uiModel) key(key string) tea.Cmd {
 	case "home", "g":
 		p.offset = 0
 		p.cursor = p.next(-1, 1)
-	case "end", "G":
+	case "end", "G", "shift+g":
 		p.offset = max(0, len(p.rows)-m.bodyHeight())
 		p.cursor = p.next(len(p.rows), -1)
 	}
 	m.keepVisible()
+	if p.live != nil && !p.live.results {
+		p.live.follow = p.offset >= len(p.rows)-m.bodyHeight()
+	}
 	return nil
 }
 
@@ -413,6 +461,10 @@ func (m *uiModel) render() string {
 		for i := p.offset; i < len(p.rows) && i < p.offset+h; i++ {
 			row := p.rows[i]
 			switch {
+			case row.input && m.task != nil:
+				lines = append(lines, "  "+m.task.input.View())
+			case row.worker && m.task != nil:
+				lines = append(lines, "  "+m.workerChoice())
 			case i == p.cursor:
 				lines = append(lines, styleSelected.Render("› "+ansi.Strip(row.text)))
 			default:
@@ -489,6 +541,8 @@ func helpLines() []string {
 		{"e", "edit a contract file in $EDITOR, then validate it"},
 		{"c", "check the project against a published contract"},
 		{"r", "recheck a run, adding an attempt"},
+		{"w", "start work on a contract; x cancels it"},
+		{"tab", "on a Work page, switch between its log and results"},
 	})...)
 }
 

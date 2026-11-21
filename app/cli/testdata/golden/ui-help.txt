@@ -15,8 +15,8 @@ assay  Contracts  Runs  ›  run SHORT › guide · attempt 2
   e           edit a contract file in $EDITOR, then validate it
   c           check the project against a published contract
   r           recheck a run, adding an attempt
-
-
+  w           start work on a contract; x cancels it
+  tab         on a Work page, switch between its log and results
 
 
 

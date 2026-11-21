@@ -21,4 +21,4 @@ assay  Contracts  Runs  ›  run SHORT › guide · attempt 2
 
 
 
-r recheck · esc back · ? help · q quit
+r recheck · w work again · esc back · ? help · q quit
