@@ -116,7 +116,7 @@ func TestReviewFailuresAreErrors(t *testing.T) {
 	slow := config.Reviewers["passes"]
 	slow.Name, slow.Command.Run, slow.Command.Timeout = "slow", sh("sleep 5; "+respond(`{"protocol":1,"verdict":"pass"}`)), 200*time.Millisecond
 	config.Reviewers["slow"] = slow
-	config.Reviewers["future"] = backend.ReviewerSpec{Name: "future", Protocol: "openai"}
+	config.Reviewers["future"] = backend.ReviewerSpec{Name: "future", Protocol: "gemini"}
 
 	rules := []backend.Rule{}
 	for name := range scripts {
@@ -155,7 +155,7 @@ func TestReviewFailuresAreErrors(t *testing.T) {
 		"wrongtype":        "expected one JSON object",
 		"huge":             "wrote more than 1048576 bytes",
 		"slow":             "reviewer slow timed out after 200ms",
-		"future":           `uses protocol "openai", which this harness doesn't support`,
+		"future":           `uses protocol "gemini", which this harness doesn't support`,
 		"unconfigured":     `reviewer "nobody" isn't configured`,
 		"no-default":       "sets no default_reviewer",
 		"missing-evidence": "couldn't be collected, so it can't be reviewed",

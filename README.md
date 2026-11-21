@@ -55,7 +55,7 @@ Backend details: [contract publication](docs/contracts.md) and [persistent runs]
 
 ## Scope
 
-Rules can check that a file exists, that an approved command succeeds, or that a reviewer you configure (TypeSafe's Jev or another decision model, or any program that speaks harness's review protocol) judges the evidence to meet a criterion, with dependencies between them. Each attempt can record file contents, git diffs, and command output as evidence, plus the exact review request and response; commands and reviewers run under the macOS sandbox. More model providers, workers, automatic repairs, MCP access, and releases are future work.
+Rules can check that a file exists, that an approved command succeeds, or that a reviewer you configure (TypeSafe's Jev, a Claude or OpenAI model, a model running locally through Ollama, or any program that speaks harness's review protocol) judges the evidence to meet a criterion, with dependencies between them. Each attempt can record file contents, git diffs, and command output as evidence, plus the exact review request and response; commands and reviewers run under the macOS sandbox. Workers, automatic repairs, MCP access, and releases are future work.
 
 ## Roadmap
 
