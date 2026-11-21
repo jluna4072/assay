@@ -96,8 +96,11 @@ func runReviewerList(e Env, cmd *command, args []string) int {
 			item.Run, item.Network, item.Timeout = spec.Command.Run, string(spec.Command.Network), timeout.String()
 		}
 		if backend.UsesAPIKey(spec.Protocol) {
-			d := spec.Decision()
-			item.Endpoint, item.Model, item.Threshold, item.Timeout = d.Endpoint, d.Model, d.Threshold, d.Timeout.String()
+			d := spec.Settings()
+			item.Endpoint, item.Model, item.Timeout = d.Endpoint, d.Model, d.Timeout.String()
+			if backend.DecisionModel(spec.Protocol) {
+				item.Threshold = d.Threshold
+			}
 			item.Key = keySource(spec)
 		}
 		list = append(list, item)
@@ -124,7 +127,10 @@ func runReviewerList(e Env, cmd *command, args []string) int {
 		}
 		uses, key := strings.Join(r.Run, " "), "-"
 		if backend.UsesAPIKey(backend.ReviewProtocol(r.Protocol)) {
-			uses, key = fmt.Sprintf("%s ≥ %.2f", r.Model, r.Threshold), r.Key
+			uses, key = r.Model, r.Key
+			if r.Threshold > 0 {
+				uses = fmt.Sprintf("%s ≥ %.2f", r.Model, r.Threshold)
+			}
 		} else if r.Network != "" {
 			uses += " (network " + r.Network + ")"
 		}

@@ -33,26 +33,41 @@ const (
 	DefaultTypeSafeKeyEnv   = "TYPESAFE_API_KEY"
 )
 
+// protocolDefaults are each HTTP protocol's default settings. A protocol
+// without a default model needs one in its config.
+var protocolDefaults = map[ReviewProtocol]APISpec{
+	DecisionsProtocol: {Endpoint: DefaultDecisionsEndpoint, Model: DefaultDecisionsModel, KeyEnv: DefaultDecisionsKeyEnv},
+	TypeSafeProtocol:  {Endpoint: DefaultTypeSafeEndpoint, Model: DefaultTypeSafeModel, KeyEnv: DefaultTypeSafeKeyEnv},
+	OpenAIProtocol:    {Endpoint: DefaultOpenAIEndpoint, KeyEnv: DefaultOpenAIKeyEnv},
+	AnthropicProtocol: {Endpoint: DefaultAnthropicEndpoint, Model: DefaultAnthropicModel, KeyEnv: DefaultAnthropicKeyEnv},
+}
+
 // UsesAPIKey reports whether a reviewer's protocol calls an HTTP API with
 // an API key that harness looks up.
 func UsesAPIKey(protocol ReviewProtocol) bool {
+	_, ok := protocolDefaults[protocol]
+	return ok
+}
+
+// DecisionModel reports whether a protocol's model answers with a
+// probability, judged against a threshold, rather than a written verdict.
+func DecisionModel(protocol ReviewProtocol) bool {
 	return protocol == DecisionsProtocol || protocol == TypeSafeProtocol
 }
 
-// Decision returns the reviewer's API settings with its protocol's
+// Settings returns the reviewer's API settings with its protocol's
 // defaults filled in.
-func (r ReviewerSpec) Decision() DecisionsSpec {
-	d := r.Decisions
-	if r.Protocol == TypeSafeProtocol {
-		if d.Endpoint == "" {
-			d.Endpoint = DefaultTypeSafeEndpoint
-		}
-		if d.Model == "" {
-			d.Model = DefaultTypeSafeModel
-		}
-		if d.KeyEnv == "" {
-			d.KeyEnv = DefaultTypeSafeKeyEnv
-		}
+func (r ReviewerSpec) Settings() APISpec {
+	d := r.API
+	defaults := protocolDefaults[r.Protocol]
+	if d.Endpoint == "" {
+		d.Endpoint = defaults.Endpoint
+	}
+	if d.Model == "" {
+		d.Model = defaults.Model
+	}
+	if d.KeyEnv == "" {
+		d.KeyEnv = defaults.KeyEnv
 	}
 	return d.WithDefaults()
 }
@@ -71,18 +86,20 @@ const (
 // a review of part of it.
 const MaxDecisionInput = 128 << 10
 
-// DecisionsSpec configures a decisions reviewer.
-type DecisionsSpec struct {
-	Endpoint  string        // API base URL, without /decisions
-	Model     string        // model ID
-	KeyEnv    string        // environment variable holding the API key
-	Threshold float64       // probability needed to pass
-	Timeout   time.Duration // DefaultReviewTimeout when zero
+// APISpec configures a reviewer that calls an HTTP API.
+type APISpec struct {
+	Endpoint    string        // API base URL, without the request path
+	Model       string        // model ID
+	KeyEnv      string        // environment variable holding the API key
+	Threshold   float64       // decision models: probability needed to pass
+	Timeout     time.Duration // DefaultReviewTimeout when zero
+	Temperature *float64      // openai: sampling temperature, when set
+	Effort      string        // anthropic: effort level, when set
 }
 
 // WithDefaults fills in unset fields with DecisionsProtocol's defaults.
-// ReviewerSpec.Decision applies the right defaults for either protocol.
-func (d DecisionsSpec) WithDefaults() DecisionsSpec {
+// ReviewerSpec.Settings applies the right defaults for each protocol.
+func (d APISpec) WithDefaults() APISpec {
 	if d.Endpoint == "" {
 		d.Endpoint = DefaultDecisionsEndpoint
 	}
@@ -104,7 +121,7 @@ func (d DecisionsSpec) WithDefaults() DecisionsSpec {
 
 // Host is the endpoint's host name. API keys are stored per host, so
 // reviewers on the same provider share one.
-func (d DecisionsSpec) Host() string {
+func (d APISpec) Host() string {
 	u, err := url.Parse(d.WithDefaults().Endpoint)
 	if err != nil {
 		return ""
@@ -114,7 +131,7 @@ func (d DecisionsSpec) Host() string {
 
 // Local reports whether the endpoint is on this machine, where a key is
 // optional.
-func (d DecisionsSpec) Local() bool {
+func (d APISpec) Local() bool {
 	host := d.Host()
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
 		return true
@@ -130,7 +147,7 @@ func CheckEndpoint(endpoint string) error {
 	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
 		return fmt.Errorf("endpoint must be a URL like %s", DefaultDecisionsEndpoint)
 	}
-	if u.Scheme == "http" && !(DecisionsSpec{Endpoint: endpoint}).Local() {
+	if u.Scheme == "http" && !(APISpec{Endpoint: endpoint}).Local() {
 		return errors.New("endpoint must use https unless it's on this machine")
 	}
 	return nil
@@ -146,7 +163,7 @@ type KeySource interface {
 type EnvKeys struct{}
 
 func (EnvKeys) Key(spec ReviewerSpec) (string, error) {
-	decisions := spec.Decision()
+	decisions := spec.Settings()
 	if key := strings.TrimSpace(lookupEnv(decisions.KeyEnv)); key != "" {
 		return key, nil
 	}
@@ -227,7 +244,7 @@ type typeSafeResponse struct {
 
 // body builds the request in the reviewer's protocol, and returns where to
 // send it.
-func (r *decisionsReviewer) body(request ReviewRequest, spec DecisionsSpec) (string, []byte, error) {
+func (r *decisionsReviewer) body(request ReviewRequest, spec APISpec) (string, []byte, error) {
 	question := "Based only on the evidence, is this acceptance criterion met? Criterion: " + request.Rule.Criterion
 	if r.spec.Protocol == TypeSafeProtocol {
 		body, err := json.Marshal(typeSafeRequest{
@@ -252,7 +269,7 @@ func (r *decisionsReviewer) body(request ReviewRequest, spec DecisionsSpec) (str
 
 func (r *decisionsReviewer) call(request ReviewRequest) (reviewCall, error) {
 	var call reviewCall
-	spec := r.spec.Decision()
+	spec := r.spec.Settings()
 	target, body, err := r.body(request, spec)
 	if err != nil {
 		return call, err
@@ -260,11 +277,20 @@ func (r *decisionsReviewer) call(request ReviewRequest) (reviewCall, error) {
 	if len(body) > MaxDecisionInput {
 		return call, fmt.Errorf("the evidence is too large for %s: the request would be %d bytes, more than the %d it accepts (about 32,000 tokens)", r.spec.Name, len(body), MaxDecisionInput)
 	}
-	keys := r.keys
+	return postJSON(r.spec, r.keys, target, body, nil)
+}
+
+// postJSON sends body to target with the reviewer's API key as a bearer
+// token (or with headers set by authorize, when given), and returns the
+// call with the response. HTTP errors are errors; a rejected key says how
+// to fix it.
+func postJSON(reviewer ReviewerSpec, keys KeySource, target string, body []byte, authorize func(*http.Request, string)) (reviewCall, error) {
+	var call reviewCall
+	spec := reviewer.Settings()
 	if keys == nil {
 		keys = EnvKeys{}
 	}
-	key, err := keys.Key(r.spec)
+	key, err := keys.Key(reviewer)
 	if err != nil {
 		return call, err
 	}
@@ -275,7 +301,10 @@ func (r *decisionsReviewer) call(request ReviewRequest) (reviewCall, error) {
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
 	httpRequest.Header.Set("User-Agent", "harness")
-	if key != "" {
+	switch {
+	case authorize != nil:
+		authorize(httpRequest, key)
+	case key != "":
 		httpRequest.Header.Set("Authorization", "Bearer "+key)
 	}
 	client := &http.Client{Timeout: spec.Timeout}
@@ -286,40 +315,46 @@ func (r *decisionsReviewer) call(request ReviewRequest) (reviewCall, error) {
 	if err != nil {
 		var timeout interface{ Timeout() bool }
 		if errors.As(err, &timeout) && timeout.Timeout() {
-			return call, fmt.Errorf("reviewer %s timed out after %s", r.spec.Name, spec.Timeout)
+			return call, fmt.Errorf("reviewer %s timed out after %s", reviewer.Name, spec.Timeout)
 		}
-		return call, fmt.Errorf("reviewer %s couldn't be reached at %s: %v", r.spec.Name, spec.Endpoint, unwrapURLError(err))
+		return call, fmt.Errorf("reviewer %s couldn't be reached at %s: %v", reviewer.Name, spec.Endpoint, unwrapURLError(err))
 	}
 	defer response.Body.Close()
 	data, err := io.ReadAll(io.LimitReader(response.Body, MaxEvidenceBytes+1))
 	call.duration = time.Since(started).Milliseconds()
 	if err != nil {
-		return call, fmt.Errorf("reviewer %s: read response: %v", r.spec.Name, err)
+		return call, fmt.Errorf("reviewer %s: read response: %v", reviewer.Name, err)
 	}
 	call.response = data
 	if len(data) > MaxEvidenceBytes {
 		call.response = data[:MaxEvidenceBytes]
-		return call, fmt.Errorf("reviewer %s returned more than %d bytes", r.spec.Name, MaxEvidenceBytes)
+		return call, fmt.Errorf("reviewer %s returned more than %d bytes", reviewer.Name, MaxEvidenceBytes)
 	}
-	switch status := response.StatusCode; {
+	return call, httpStatusError(reviewer, key, response.StatusCode, data)
+}
+
+// httpStatusError describes a non-200 response, or returns nil.
+func httpStatusError(reviewer ReviewerSpec, key string, status int, data []byte) error {
+	spec := reviewer.Settings()
+	switch {
 	case status == http.StatusUnauthorized || status == http.StatusForbidden:
 		// Name the service, not the model: a key for one provider sent to
 		// another (a TypeSafe key to a gateway, say) fails here. A key from
 		// the environment variable overrides a saved one, so logging in
 		// again wouldn't help; say to fix the variable instead.
-		fix := fmt.Sprintf("replace it with \"harness reviewer login %s\"", r.spec.Name)
+		fix := fmt.Sprintf("replace it with \"harness reviewer login %s\"", reviewer.Name)
 		if env := strings.TrimSpace(lookupEnv(spec.KeyEnv)); env != "" && env == key {
 			fix = fmt.Sprintf("fix or unset %s, which overrides any key saved with \"harness reviewer login\"", spec.KeyEnv)
 		}
-		return call, fmt.Errorf("reviewer %s: %s rejected the API key (HTTP %d%s). Check that it's a key for %s, then %s", r.spec.Name, spec.Host(), status, apiMessage(data), spec.Host(), fix)
+		return fmt.Errorf("reviewer %s: %s rejected the API key (HTTP %d%s). Check that it's a key for %s, then %s", reviewer.Name, spec.Host(), status, apiMessage(data), spec.Host(), fix)
 	case status != http.StatusOK:
-		return call, fmt.Errorf("%s returned HTTP %d%s", r.spec.Name, status, apiMessage(data))
+		return fmt.Errorf("%s returned HTTP %d%s", reviewer.Name, status, apiMessage(data))
 	}
-	return call, nil
+	return nil
 }
 
 func (r *decisionsReviewer) parse(data []byte, _ int, review *Review) error {
-	spec := r.spec.Decision()
+	spec := r.spec.Settings()
 	p, model, err := r.probability(data)
 	if err != nil {
 		return err

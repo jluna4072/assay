@@ -159,7 +159,7 @@ default_reviewer: missing
   noproto:
     run: [x]
   future:
-    protocol: openai
+    protocol: gemini
   norun:
     protocol: command
 default_reviewer: missing
@@ -170,8 +170,8 @@ default_reviewer: missing
 	}
 	want = []string{
 		`default_reviewer "missing" isn't one of the reviewers configured here`,
-		`reviewer "future": protocol "openai" isn't supported by this harness; it supports: command, decisions, typesafe`,
-		`reviewer "noproto": protocol is required; this harness supports: command, decisions, typesafe`,
+		`reviewer "future": protocol "gemini" isn't supported by this harness; it supports: command, typesafe, decisions, openai, anthropic`,
+		`reviewer "noproto": protocol is required; this harness supports: command, typesafe, decisions, openai, anthropic`,
 		`reviewer "norun": run needs a program and its arguments, like [go, test, ./...]`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
@@ -197,19 +197,19 @@ func TestParseDecisionsReviewers(t *testing.T) {
 	if len(problems) != 0 {
 		t.Fatalf("problems: %v", problems)
 	}
-	jev := config.Reviewers["jev"].Decisions.WithDefaults()
+	jev := config.Reviewers["jev"].API.WithDefaults()
 	if jev.Endpoint != backend.DefaultDecisionsEndpoint || jev.Model != "typesafe-ai/jev" || jev.KeyEnv != "AI_GATEWAY_API_KEY" || jev.Threshold != 0.9 || jev.Timeout != 2*time.Minute {
 		t.Fatalf("jev defaults: %+v", jev)
 	}
-	if config.Reviewers["jev"].Decisions.Host() != "ai-gateway.vercel.sh" || config.Reviewers["jev"].Decisions.Local() {
+	if config.Reviewers["jev"].API.Host() != "ai-gateway.vercel.sh" || config.Reviewers["jev"].API.Local() {
 		t.Fatal("jev host")
 	}
-	direct := config.Reviewers["direct"].Decision()
+	direct := config.Reviewers["direct"].Settings()
 	if direct.Endpoint != "https://api.typesafe.ai/v1" || direct.Model != "jev-latest" || direct.KeyEnv != "TYPESAFE_API_KEY" || direct.Threshold != 0.8 || direct.Host() != "api.typesafe.ai" {
 		t.Fatalf("typesafe defaults: %+v", direct)
 	}
-	local := config.Reviewers["local"].Decisions.WithDefaults()
-	if local.Endpoint != "http://localhost:8080/v1" || local.Model != "my-decider" || local.KeyEnv != "LOCAL_KEY" || local.Threshold != 0.75 || local.Timeout != 10*time.Second || !config.Reviewers["local"].Decisions.Local() {
+	local := config.Reviewers["local"].API.WithDefaults()
+	if local.Endpoint != "http://localhost:8080/v1" || local.Model != "my-decider" || local.KeyEnv != "LOCAL_KEY" || local.Threshold != 0.75 || local.Timeout != 10*time.Second || !config.Reviewers["local"].API.Local() {
 		t.Fatalf("local: %+v", local)
 	}
 

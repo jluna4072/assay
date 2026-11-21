@@ -23,7 +23,7 @@ func (k staticKeys) Key(spec backend.ReviewerSpec) (string, error) {
 	if key, ok := k[spec.Name]; ok {
 		return key, nil
 	}
-	if spec.Decisions.Local() {
+	if spec.API.Local() {
 		return "", nil
 	}
 	return "", errors.New("no key for " + spec.Name)
@@ -49,7 +49,7 @@ func decisionsRun(t *testing.T, config backend.Config, keys backend.KeySource, p
 }
 
 func decisionsReviewer(name, endpoint string, threshold float64, timeout time.Duration) backend.ReviewerSpec {
-	return backend.ReviewerSpec{Name: name, Protocol: backend.DecisionsProtocol, Decisions: backend.DecisionsSpec{Endpoint: endpoint, Threshold: threshold, Timeout: timeout}}
+	return backend.ReviewerSpec{Name: name, Protocol: backend.DecisionsProtocol, API: backend.APISpec{Endpoint: endpoint, Threshold: threshold, Timeout: timeout}}
 }
 
 // fakeDecisions answers each request by the reviewer name in the URL path
@@ -117,7 +117,7 @@ func TestDecisionsReviewer(t *testing.T) {
 	}
 	config.Reviewers["lenient"] = decisionsReviewer("lenient", server.URL+"/lenient", 0.5, 0)
 	unsure := config.Reviewers["unsure"]
-	unsure.Decisions.Model = "my-decider"
+	unsure.API.Model = "my-decider"
 	config.Reviewers["unsure"] = unsure
 
 	run := decisionsRun(t, config, staticKeys{"sure": "sk_test_1"}, project,
@@ -259,7 +259,7 @@ func TestTypeSafeReviewer(t *testing.T) {
 	os.WriteFile(filepath.Join(project, "garbled.txt"), []byte("Garbled\n"), 0600)
 	os.WriteFile(filepath.Join(project, "other.txt"), []byte("Other\n"), 0600)
 	config := backend.DefaultConfig()
-	config.Reviewers["jev"] = backend.ReviewerSpec{Name: "jev", Protocol: backend.TypeSafeProtocol, Decisions: backend.DecisionsSpec{Endpoint: server.URL + "/v1"}}
+	config.Reviewers["jev"] = backend.ReviewerSpec{Name: "jev", Protocol: backend.TypeSafeProtocol, API: backend.APISpec{Endpoint: server.URL + "/v1"}}
 
 	run := decisionsRun(t, config, staticKeys{"jev": "apikey_test"}, project,
 		reviewRule("hello", "jev"),

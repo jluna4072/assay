@@ -69,6 +69,17 @@ reviewers: {}
 #    endpoint: https://ai-gateway.vercel.sh/v1   # (default)
 #    model: typesafe-ai/jev   # (default); key from AI_GATEWAY_API_KEY or the Keychain
 #
+#  claude:                    # a Claude model; it explains its verdicts
+#    protocol: anthropic      # key from ANTHROPIC_API_KEY or the Keychain
+#    model: claude-haiku-5-5  # default claude-opus-5-5; Haiku costs much less
+#    effort: low              # optional: low, medium, high, xhigh, or max
+#
+#  local:                     # a model on this machine: free, no key
+#    protocol: openai         # any OpenAI-compatible chat API
+#    endpoint: http://localhost:11434/v1   # Ollama; LM Studio is :1234/v1
+#    model: qwen3:8b          # the model's name on that server
+#    temperature: 0           # optional
+#
 #  careful:                   # a program that reads a review request as JSON
 #    protocol: command        # on stdin and writes its verdict on stdout
 
@@ -95,11 +106,13 @@ type reviewerFile struct {
 	Network string   `yaml:"network"`
 	Env     []string `yaml:"env"`
 	Caches  []string `yaml:"caches"`
-	// decisions
-	Endpoint  string   `yaml:"endpoint"`
-	Model     string   `yaml:"model"`
-	KeyEnv    string   `yaml:"key_env"`
-	Threshold *float64 `yaml:"threshold"`
+	// HTTP APIs: decisions, typesafe, openai, anthropic
+	Endpoint    string   `yaml:"endpoint"`
+	Model       string   `yaml:"model"`
+	KeyEnv      string   `yaml:"key_env"`
+	Threshold   *float64 `yaml:"threshold"`   // decisions, typesafe
+	Temperature *float64 `yaml:"temperature"` // openai
+	Effort      string   `yaml:"effort"`      // anthropic
 }
 
 type commandFile struct {
@@ -203,12 +216,29 @@ func ParseConfig(data []byte) (backend.Config, []contractfile.Problem) {
 		case backend.CommandProtocol:
 			spec.Command = checkProgram(name, prefix, reviewer.Run, reviewer.Timeout, reviewer.Network, reviewer.Env, reviewer.Caches, add)
 			unused("command", map[string]bool{"endpoint": reviewer.Endpoint != "", "model": reviewer.Model != "", "key_env": reviewer.KeyEnv != "", "threshold": reviewer.Threshold != nil})
-		case backend.DecisionsProtocol, backend.TypeSafeProtocol:
+		case backend.DecisionsProtocol, backend.TypeSafeProtocol, backend.OpenAIProtocol, backend.AnthropicProtocol:
 			if !backend.CommandName(name) {
 				add("%sname must be letters, digits, '.', '_', or '-'", prefix)
 			}
 			unused(string(spec.Protocol), map[string]bool{"run": len(reviewer.Run) > 0, "network": reviewer.Network != "", "env": len(reviewer.Env) > 0, "caches": len(reviewer.Caches) > 0})
-			decisions := backend.DecisionsSpec{Endpoint: reviewer.Endpoint, Model: reviewer.Model, KeyEnv: reviewer.KeyEnv}
+			decisions := backend.APISpec{Endpoint: reviewer.Endpoint, Model: reviewer.Model, KeyEnv: reviewer.KeyEnv, Temperature: reviewer.Temperature, Effort: reviewer.Effort}
+			decisionModel := backend.DecisionModel(spec.Protocol)
+			unused(string(spec.Protocol), map[string]bool{
+				"threshold":   reviewer.Threshold != nil && !decisionModel,
+				"temperature": reviewer.Temperature != nil && spec.Protocol != backend.OpenAIProtocol,
+				"effort":      reviewer.Effort != "" && spec.Protocol != backend.AnthropicProtocol,
+			})
+			if spec.Protocol == backend.OpenAIProtocol && reviewer.Model == "" {
+				add("%smodel is required for the openai protocol: the model's name at that service, or on your local server", prefix)
+			}
+			if t := reviewer.Temperature; t != nil && (*t < 0 || *t > 2) {
+				add("%stemperature must be between 0 and 2", prefix)
+			}
+			switch reviewer.Effort {
+			case "", "low", "medium", "high", "xhigh", "max":
+			default:
+				add("%seffort must be low, medium, high, xhigh, or max", prefix)
+			}
 			if reviewer.Endpoint != "" {
 				if err := backend.CheckEndpoint(reviewer.Endpoint); err != nil {
 					add("%s%v", prefix, err)
@@ -217,7 +247,7 @@ func ParseConfig(data []byte) (backend.Config, []contractfile.Problem) {
 			if reviewer.KeyEnv != "" && !variableName.MatchString(reviewer.KeyEnv) {
 				add("%skey_env %q isn't an environment variable name", prefix, reviewer.KeyEnv)
 			}
-			if t := reviewer.Threshold; t != nil {
+			if t := reviewer.Threshold; t != nil && decisionModel {
 				if *t <= 0 || *t > 1 {
 					add("%sthreshold must be more than 0 and at most 1, like 0.9", prefix)
 				}
@@ -230,11 +260,11 @@ func ParseConfig(data []byte) (backend.Config, []contractfile.Problem) {
 				}
 				decisions.Timeout = timeout
 			}
-			spec.Decisions = decisions
+			spec.API = decisions
 		case "":
-			add("%sprotocol is required; this harness supports: command, decisions, typesafe", prefix)
+			add("%sprotocol is required; this harness supports: command, typesafe, decisions, openai, anthropic", prefix)
 		default:
-			add("%sprotocol %q isn't supported by this harness; it supports: command, decisions, typesafe", prefix, reviewer.Protocol)
+			add("%sprotocol %q isn't supported by this harness; it supports: command, typesafe, decisions, openai, anthropic", prefix, reviewer.Protocol)
 		}
 		config.Reviewers[name] = spec
 	}

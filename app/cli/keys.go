@@ -35,7 +35,7 @@ func keySource(spec backend.ReviewerSpec) string {
 	if !backend.UsesAPIKey(spec.Protocol) {
 		return ""
 	}
-	d := spec.Decision()
+	d := spec.Settings()
 	switch _, err := keychain.Get(keychainService, d.Host()); {
 	case strings.TrimSpace(os.Getenv(d.KeyEnv)) != "":
 		return "$" + d.KeyEnv
@@ -48,7 +48,7 @@ func keySource(spec backend.ReviewerSpec) string {
 }
 
 func (k *cliKeys) Key(spec backend.ReviewerSpec) (string, error) {
-	d := spec.Decision()
+	d := spec.Settings()
 	if key := strings.TrimSpace(os.Getenv(d.KeyEnv)); key != "" {
 		return key, nil
 	}
@@ -186,7 +186,7 @@ func runReviewerLogin(e Env, cmd *command, args []string) int {
 		fmt.Fprintf(e.Stderr, "harness %s: can't read a key here\n", cmd.name)
 		return ExitOperational
 	}
-	d := spec.Decision()
+	d := spec.Settings()
 	if e.Interactive {
 		fmt.Fprintf(e.Stderr, "API key for %s (used by reviewer %s).\n", d.Host(), spec.Name)
 	}
@@ -211,7 +211,7 @@ func runReviewerLogout(e Env, cmd *command, args []string) int {
 	if code != ExitOK {
 		return code
 	}
-	host := spec.Decision().Host()
+	host := spec.Settings().Host()
 	switch err := keychain.Delete(keychainService, host); {
 	case errors.Is(err, keychain.ErrNotFound):
 		fmt.Fprintf(e.Stdout, "No API key was saved for %s.\n", host)

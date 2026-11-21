@@ -204,3 +204,26 @@ func TestTypeSafeReviewerListing(t *testing.T) {
 		t.Fatalf("list:\n%s", list)
 	}
 }
+
+func TestChatReviewerListing(t *testing.T) {
+	dir := t.TempDir()
+	mustRun(t, dir, "init")
+	os.WriteFile(filepath.Join(dir, ".harness", "config.yaml"), []byte(`version: 1
+reviewers:
+  claude:
+    protocol: anthropic
+    model: claude-haiku-5-5
+  local:
+    protocol: openai
+    endpoint: http://localhost:11434/v1
+    model: qwen3:8b
+default_reviewer: local
+`), 0600)
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ant-test")
+	list := mustRun(t, dir, "reviewer", "list")
+	for _, want := range []string{"claude           anthropic  claude-haiku-5-5  $ANTHROPIC_API_KEY  2m0s", "local (default)  openai     qwen3:8b          not needed"} {
+		if !strings.Contains(list, want) {
+			t.Errorf("list lacks %q:\n%s", want, list)
+		}
+	}
+}

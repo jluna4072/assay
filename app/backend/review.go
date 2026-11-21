@@ -39,8 +39,9 @@ type ReviewerSpec struct {
 	// command (sandbox, cleared environment, timeout), except it can never
 	// write to the project.
 	Command CommandSpec
-	// Decisions configures DecisionsProtocol.
-	Decisions DecisionsSpec
+	// API configures reviewers that call an HTTP API: DecisionsProtocol,
+	// TypeSafeProtocol, OpenAIProtocol, and AnthropicProtocol.
+	API APISpec
 }
 
 // Describe summarizes what the reviewer runs, for listings.
@@ -49,8 +50,11 @@ func (r ReviewerSpec) Describe() string {
 	case CommandProtocol:
 		return strings.Join(r.Command.Run, " ")
 	case DecisionsProtocol, TypeSafeProtocol:
-		d := r.Decision()
+		d := r.Settings()
 		return fmt.Sprintf("%s at %s, passes at %.2f", d.Model, d.Endpoint, d.Threshold)
+	case OpenAIProtocol, AnthropicProtocol:
+		d := r.Settings()
+		return fmt.Sprintf("%s at %s", d.Model, d.Endpoint)
 	}
 	return ""
 }
@@ -145,6 +149,10 @@ func (c *collector) reviewerFor(spec ReviewerSpec, config Config) (reviewer, err
 		return &commandReviewer{collector: c, spec: spec, sandbox: config.Sandbox}, nil
 	case DecisionsProtocol, TypeSafeProtocol:
 		return &decisionsReviewer{spec: spec, keys: c.keys}, nil
+	case OpenAIProtocol:
+		return &openAIReviewer{spec: spec, keys: c.keys}, nil
+	case AnthropicProtocol:
+		return &anthropicReviewer{spec: spec, keys: c.keys}, nil
 	}
 	return nil, fmt.Errorf("reviewer %q uses protocol %q, which this harness doesn't support", spec.Name, spec.Protocol)
 }
@@ -254,6 +262,12 @@ func parseReview(data []byte, items int, review *Review) error {
 	if response.Protocol == nil || *response.Protocol != ReviewProtocolVersion {
 		return fmt.Errorf(`"protocol" must be %d`, ReviewProtocolVersion)
 	}
+	return checkVerdict(response, items, review)
+}
+
+// checkVerdict validates a verdict, its citations, and any probability, and
+// records them in review.
+func checkVerdict(response reviewResponse, items int, review *Review) error {
 	switch verdict := Verdict(response.Verdict); verdict {
 	case VerdictPass, VerdictFail, VerdictInsufficient:
 		review.Verdict = verdict
