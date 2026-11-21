@@ -2,6 +2,8 @@ package cli
 
 import (
 	"bytes"
+	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -61,8 +63,8 @@ func press(m *uiModel, keys ...string) tea.Cmd {
 		msg := tea.KeyPressMsg{Code: rune(k[0]), Text: k}
 		if code, ok := keyCodes[k]; ok {
 			msg = tea.KeyPressMsg{Code: code}
-		} else if k == "ctrl+c" {
-			msg = tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl}
+		} else if letter, ok := strings.CutPrefix(k, "ctrl+"); ok {
+			msg = tea.KeyPressMsg{Code: rune(letter[0]), Mod: tea.ModCtrl}
 		}
 		_, cmd = m.Update(msg)
 	}
@@ -210,7 +212,7 @@ func TestUIScrollsAndReloads(t *testing.T) {
 	// A new attempt shows up after r.
 	before := len(m.page().rows)
 	mustRun(t, dir, "recheck")
-	press(m, "r")
+	press(m, "ctrl+r")
 	if len(m.page().rows) <= before {
 		t.Fatalf("reload: %d rows, had %d", len(m.page().rows), before)
 	}
@@ -261,7 +263,9 @@ func TestUIInATerminal(t *testing.T) {
 	}
 	cmd := exec.Command(bin)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "NO_COLOR=1")
+	editor := filepath.Join(t.TempDir(), "editor")
+	os.WriteFile(editor, []byte("#!/bin/sh\nsed -i.bak 's/Project has a guide/Project has a user guide/' \"$1\"\n"), 0755)
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color", "NO_COLOR=1", "VISUAL=", "EDITOR="+editor)
 	terminal, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: 24, Cols: 80})
 	if err != nil {
 		t.Fatal(err)
@@ -281,6 +285,14 @@ func TestUIInATerminal(t *testing.T) {
 		}
 	}
 	waitFor("Contract files in assay/")
+	// Edit docs.yaml (the second file) with an "editor" that changes it,
+	// then publish the change.
+	terminal.Write([]byte("je"))
+	waitFor("✓ docs.yaml: docs, 2 rules")
+	terminal.Write([]byte("p"))
+	waitFor("Publish docs.yaml as docs@2?")
+	terminal.Write([]byte("y"))
+	waitFor("published docs@2 (2 rules)")
 	terminal.Write([]byte("2"))
 	waitFor("ATTEMPTS")
 	terminal.Write([]byte("q"))
@@ -295,6 +307,9 @@ func TestUIInATerminal(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		cmd.Process.Kill()
 		t.Fatalf("assay didn't quit:\n%q", output.String())
+	}
+	if out := mustRun(t, dir, "contract", "versions", "docs"); !strings.Contains(out, "2") {
+		t.Errorf("docs@2 wasn't published:\n%s", out)
 	}
 	raw := output.String()
 	if !strings.Contains(raw, "\x1b[?1049h") || !strings.Contains(raw, "\x1b[?1049l") {
@@ -320,4 +335,177 @@ func (b *safeBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.buf.String()
+}
+
+func TestUIValidateAndPublish(t *testing.T) {
+	dir := uiProject(t)
+	m := newTestUI(t, dir, tabContracts)
+	press(m, "v")
+	if !strings.Contains(m.status, "broken.yaml: 2 problems") {
+		t.Fatalf("validate broken.yaml: %q", m.status)
+	}
+	press(m, "p")
+	if !strings.Contains(m.status, "can't be published") || m.confirm != nil {
+		t.Fatalf("publish broken.yaml: %q", m.status)
+	}
+	press(m, "down", "v")
+	if !strings.Contains(ansi.Strip(m.note), "✓ docs.yaml: docs, 2 rules") {
+		t.Fatalf("validate docs.yaml: %q %q", m.note, m.status)
+	}
+	press(m, "p")
+	if m.confirm != nil || !strings.Contains(m.note, "docs@1 unchanged") {
+		t.Fatalf("publish unchanged: %q", m.note)
+	}
+
+	os.WriteFile(filepath.Join(dir, "assay", "docs.yaml"), []byte(strings.Replace(evidenceContract, "Project has a guide", "Project has a user guide", 1)), 0644)
+	press(m, "p")
+	if m.confirm == nil {
+		t.Fatalf("no confirmation: %q %q", m.status, m.note)
+	}
+	golden(t, "ui-publish.txt", dir, screen(t, m, dir))
+	press(m, "n")
+	if m.confirm != nil || len(m.stack) != 1 || m.note != "nothing published" {
+		t.Fatalf("cancel: %d pages, %q", len(m.stack), m.note)
+	}
+	if versions, _ := m.data.s.service.ListVersions("docs"); len(versions) != 1 {
+		t.Fatalf("cancelling published: %d versions", len(versions))
+	}
+	press(m, "p", "j", "y")
+	if versions, _ := m.data.s.service.ListVersions("docs"); len(versions) != 2 {
+		t.Fatalf("y didn't publish: %d versions", len(versions))
+	}
+	if !strings.Contains(ansi.Strip(m.note), "published docs@2 (2 rules)") || m.confirm != nil || len(m.stack) != 1 {
+		t.Fatalf("after publishing: %q, %d pages", m.note, len(m.stack))
+	}
+	if !strings.Contains(ansi.Strip(m.render()), "published as v2") {
+		t.Fatalf("the list wasn't reloaded:\n%s", ansi.Strip(m.render()))
+	}
+}
+
+func TestUIEdit(t *testing.T) {
+	dir := uiProject(t)
+	m := newTestUI(t, dir, tabContracts)
+	if cmd := press(m, "down", "e"); cmd == nil {
+		t.Fatal("e gave no command")
+	}
+	// Bubble Tea runs the editor; here it "changes" the file, then closes.
+	os.WriteFile(filepath.Join(dir, "assay", "docs.yaml"), []byte("id: docs\nname: Docs\nrules: []\n"), 0644)
+	m.Update(uiEditedMsg{file: "docs.yaml"})
+	if !strings.Contains(m.status, "docs.yaml: 1 problem") {
+		t.Fatalf("after editing: %q %q", m.status, m.note)
+	}
+	m.Update(uiEditedMsg{file: "docs.yaml", err: errors.New("exit status 1")})
+	if !strings.Contains(m.status, "the editor failed") {
+		t.Fatalf("editor failure: %q", m.status)
+	}
+
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "code --wait")
+	if got := editorCommand("a.yaml").Args; strings.Join(got, " ") != "code --wait a.yaml" {
+		t.Errorf("editor command %q", got)
+	}
+	t.Setenv("VISUAL", "nano")
+	if got := editorCommand("a.yaml").Args; strings.Join(got, " ") != "nano a.yaml" {
+		t.Errorf("VISUAL: %q", got)
+	}
+	t.Setenv("VISUAL", "")
+	t.Setenv("EDITOR", "")
+	if got := editorCommand("a.yaml").Args; strings.Join(got, " ") != "vi a.yaml" {
+		t.Errorf("fallback: %q", got)
+	}
+}
+
+func TestUICheckAndRecheck(t *testing.T) {
+	dir := uiProject(t)
+	m := newTestUI(t, dir, tabContracts)
+	press(m, "end")
+	if target := m.target(); target.contract != "docs" {
+		t.Fatalf("selected %+v", target)
+	}
+	cmd := press(m, "c")
+	if cmd == nil || !strings.Contains(m.busy, "checking docs@1") {
+		t.Fatalf("c: busy %q", m.busy)
+	}
+	press(m, "c")
+	if !strings.Contains(m.status, "wait for the check") {
+		t.Fatalf("second check while busy: %q", m.status)
+	}
+	m.Update(cmd())
+	if m.busy != "" || !strings.Contains(ansi.Strip(m.note), "PASSED · docs@1 · run") || !strings.HasPrefix(m.page().title, "run ") {
+		t.Fatalf("after check: %q on %q", m.note, m.page().title)
+	}
+	if runs, _ := m.data.s.service.ListRuns(); len(runs) != 2 {
+		t.Fatalf("%d runs", len(runs))
+	}
+
+	// Recheck from the run's page: it stays there and shows attempt 2.
+	cmd = press(m, "r")
+	m.Update(cmd())
+	if !strings.Contains(ansi.Strip(m.note), "attempt 2") || !strings.Contains(ansi.Strip(m.render()), "attempt 2 · passed") {
+		t.Fatalf("after recheck: %q\n%s", m.note, ansi.Strip(m.render()))
+	}
+	if !strings.HasPrefix(m.page().title, "run ") || len(m.stack) != 2 {
+		t.Fatalf("recheck moved to %q", m.page().title)
+	}
+
+	// Keys that need something else say what.
+	press(m, "esc", "tab", "p")
+	if !strings.Contains(m.status, "select one on the Contracts tab") {
+		t.Fatalf("p on runs: %q", m.status)
+	}
+	if keys := m.keys(); !strings.HasPrefix(keys, "r recheck · enter open") {
+		t.Errorf("runs keys: %q", keys)
+	}
+}
+
+func TestContractDiff(t *testing.T) {
+	dir := t.TempDir()
+	mustRun(t, dir, "init")
+	stdout, _, code := runIn(dir, false, "contract", "diff", "assay/example.yaml")
+	if code != ExitNegative || !strings.HasPrefix(stdout, "--- (not published)\n+++ assay/example.yaml\n+ version: 1\n") {
+		t.Fatalf("unpublished: exit %d\n%s", code, stdout)
+	}
+	mustRun(t, dir, "contract", "publish", "assay/example.yaml", "--yes")
+	stdout, _, code = runIn(dir, false, "contract", "diff", "assay/example.yaml")
+	if code != ExitOK || stdout != "example@1 unchanged: the file matches the latest published version\n" {
+		t.Fatalf("unchanged: exit %d\n%s", code, stdout)
+	}
+
+	path := filepath.Join(dir, "assay", "example.yaml")
+	data, _ := os.ReadFile(path)
+	os.WriteFile(path, []byte(strings.Replace(string(data), "path: README.md", "path: README.txt", 1)), 0644)
+	stdout, _, code = runIn(dir, false, "contract", "diff", "assay/example.yaml")
+	want := regexp.MustCompile(`^--- example@1 \(published [^)]+\)\n\+\+\+ assay/example.yaml\n  …\n    - id: readme\n(.*\n)*-     path: README.md\n\+     path: README.txt\n$`)
+	if code != ExitNegative || !want.MatchString(stdout) {
+		t.Fatalf("changed: exit %d\n%s", code, stdout)
+	}
+	stdout, _, code = runIn(dir, false, "contract", "diff", "assay/example.yaml", "--json")
+	if code != ExitNegative || !strings.Contains(stdout, `"latest": 1`) || !strings.Contains(stdout, `"changed": true`) || !strings.Contains(stdout, `"+     path: README.txt"`) {
+		t.Fatalf("json: exit %d\n%s", code, stdout)
+	}
+
+	os.WriteFile(path, []byte("id: example\nname: x\nrules: []\n"), 0644)
+	if _, _, code = runIn(dir, false, "contract", "diff", "assay/example.yaml"); code != ExitNegative {
+		t.Fatalf("invalid file: exit %d", code)
+	}
+	if _, _, code = runIn(dir, false, "contract", "diff"); code != ExitUsage {
+		t.Fatalf("no file: exit %d", code)
+	}
+}
+
+func TestTrimDiff(t *testing.T) {
+	var a, b []string
+	for i := range 20 {
+		a = append(a, fmt.Sprint(i))
+		b = append(b, fmt.Sprint(i))
+	}
+	b[10] = "ten"
+	var got []string
+	for _, line := range trimDiff(lineDiff(a, b)) {
+		got = append(got, line.String())
+	}
+	want := ". ,  7,  8,  9,- 10,+ ten,  11,  12,  13,. "
+	if strings.Join(got, ",") != want {
+		t.Errorf("got %q", strings.Join(got, ","))
+	}
 }

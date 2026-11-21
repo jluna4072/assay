@@ -432,14 +432,23 @@ func printAttempt(w io.Writer, run backend.Run) {
 	attempt := run.Attempts[len(run.Attempts)-1]
 	fmt.Fprintf(w, "%s@%d · run %s · attempt %d · %s\n\n", run.ContractID, run.Version, shortID(run.ID), attempt.Number, strings.ToUpper(string(attempt.Status)))
 	printResults(w, attempt, false)
+	fmt.Fprintln(w)
+	if attempt.Status == backend.Passed {
+		fmt.Fprintln(w, attemptCounts(attempt))
+		return
+	}
+	fmt.Fprintf(w, "%s · fix, then: assay recheck %s\n", attemptCounts(attempt), shortID(run.ID))
+}
+
+// attemptCounts sums up an attempt's results: "all 2 rules passed", or
+// "1 failed, 1 blocked".
+func attemptCounts(attempt backend.Attempt) string {
+	if attempt.Status == backend.Passed {
+		return fmt.Sprintf("all %s passed", plural(len(attempt.Results), "rule"))
+	}
 	counts := map[backend.ResultStatus]int{}
 	for _, r := range attempt.Results {
 		counts[r.Status]++
-	}
-	fmt.Fprintln(w)
-	if attempt.Status == backend.Passed {
-		fmt.Fprintf(w, "all %s passed\n", plural(len(attempt.Results), "rule"))
-		return
 	}
 	var parts []string
 	if n := counts[backend.OperationalError]; n > 0 {
@@ -454,7 +463,7 @@ func printAttempt(w io.Writer, run backend.Run) {
 	if n := counts[backend.Passed]; n > 0 {
 		parts = append(parts, fmt.Sprintf("%d passed", n))
 	}
-	fmt.Fprintf(w, "%s · fix, then: assay recheck %s\n", strings.Join(parts, ", "), shortID(run.ID))
+	return strings.Join(parts, ", ")
 }
 
 func runCheck(e Env, cmd *command, args []string) int {

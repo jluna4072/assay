@@ -89,6 +89,7 @@ var commands = []command{
 	initCommand,
 	validateCommand,
 	publishCommand,
+	diffCommand,
 	versionsCommand,
 	showCommand,
 	graphCommand,

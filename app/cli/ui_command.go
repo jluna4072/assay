@@ -22,8 +22,10 @@ runs with every attempt, result, and piece of evidence. With a run ID (any
 unique prefix), opens that run. Running "assay" with no arguments at a
 terminal does the same as "assay ui".
 
-The UI only shows what assay has recorded; it changes nothing. Press ? in it
-for keys.
+Select something and act on it with a key: v validates a contract file, p
+publishes one after showing what would change and asking, e opens one in
+$EDITOR, c checks the project against a published contract, and r rechecks
+a run. Each does what the matching command does. Press ? in it for keys.
 
 Flags:
 ` + projectFlagHelp + `
@@ -59,6 +61,9 @@ func runUI(e Env, cmd *command, args []string) int {
 	}
 	defer s.Close()
 
+	// A missing API key is reported in the result, not asked for: the
+	// screen belongs to the UI.
+	s.service.Keys = newKeys(e, false)
 	model := newUIModel(&uiData{s: s}, tabContracts)
 	model.welcome = model.data.welcome()
 	if len(ids) == 1 {

@@ -1,0 +1,24 @@
+assay  Contracts  Runs  ›  publish docs.yaml
+────────────────────────────────────────────────────────────────────────────────
+  Publish docs.yaml as docs@2?
+  Published versions never change; runs keep the version they started with.
+  
+  --- docs@1 (published TIME)
+  +++ assay/docs.yaml
+    …
+        evidence:
+          - file: README.md
+      - id: guide
+  -     criterion: Project has a guide
+  +     criterion: Project has a user guide
+        check: file_exists
+        path: docs/guide.md
+        depends_on: [readme]
+    …
+
+
+
+
+
+
+y publish docs@2 · n cancel · ↑↓ scroll
