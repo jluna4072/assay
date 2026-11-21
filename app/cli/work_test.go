@@ -86,3 +86,54 @@ func TestWorkCommandRejectsAndUsage(t *testing.T) {
 		t.Fatalf("both: exit %d\n%s", code, stderr)
 	}
 }
+
+func TestWorkResumeAndWorkspaces(t *testing.T) {
+	dir := workCLIProject(t, `cat >/dev/null; echo nothing to do`)
+	stdout, _, code := runIn(dir, false, "work", "readme", "--task", "x", "--max-attempts", "1", "--quiet")
+	if code != ExitNegative || !strings.Contains(stdout, "harness work --resume ") || !strings.Contains(stdout, "--max-attempts 3") {
+		t.Fatalf("rejected: exit %d\n%s", code, stdout)
+	}
+	if _, stderr, code := runIn(dir, false, "work", "--resume", "zz"); code != ExitUsage || !strings.Contains(stderr, "no run matches") {
+		t.Fatalf("unknown run: exit %d\n%s", code, stderr)
+	}
+	if _, stderr, code := runIn(dir, false, "work", "readme", "--resume", "x"); code != ExitUsage || !strings.Contains(stderr, "give only the run and limits") {
+		t.Fatalf("resume with a contract: exit %d\n%s", code, stderr)
+	}
+	if _, stderr, code := runIn(dir, false, "work", "--resume", ""); code == ExitOK {
+		t.Fatalf("empty resume: %s", stderr)
+	}
+	if _, stderr, code := runIn(dir, false, "work", "--resume", firstRun(t, dir)); code != ExitUsage || !strings.Contains(stderr, "used all 1 of its attempts") {
+		t.Fatalf("no attempts left: exit %d\n%s", code, stderr)
+	}
+
+	// The worker now writes the README; resuming with one more attempt passes.
+	config := filepath.Join(dir, ".harness", "config.yaml")
+	os.WriteFile(config, []byte("version: 1\nsandbox: off\nworkers:\n  writer:\n    run: [sh, -c, 'cat >/dev/null; echo hi > README.md']\n"), 0600)
+	stdout, stderr, code := runIn(dir, false, "work", "--resume", firstRun(t, dir), "--max-attempts", "2")
+	if code != ExitOK || !strings.Contains(stderr, "resuming after attempt 1 · readme@1") || !strings.Contains(stderr, "attempt 2 of 2") || !strings.HasPrefix(stdout, "ACCEPTED") {
+		t.Fatalf("resume: exit %d\n%s%s", code, stdout, stderr)
+	}
+
+	list := mustRun(t, dir, "workspace", "list")
+	if !strings.Contains(list, "accepted") || !strings.Contains(list, ".harness/workspaces/") {
+		t.Fatalf("list:\n%s", list)
+	}
+	if out := mustRun(t, dir, "workspace", "clean"); !strings.HasPrefix(out, "removed  .harness/workspaces/") || !strings.Contains(out, "kept") {
+		t.Fatalf("clean:\n%s", out)
+	}
+	if list := mustRun(t, dir, "workspace", "list"); !strings.Contains(list, "(removed)") {
+		t.Fatalf("list after clean:\n%s", list)
+	}
+	if out := mustRun(t, dir, "workspace", "clean"); out != "no workspaces to remove\n" {
+		t.Fatalf("clean again: %q", out)
+	}
+}
+
+func firstRun(t *testing.T, dir string) string {
+	t.Helper()
+	var listed struct {
+		Runs []struct{ ID string } `json:"runs"`
+	}
+	json.Unmarshal([]byte(mustRun(t, dir, "runs", "--json")), &listed)
+	return listed.Runs[len(listed.Runs)-1].ID
+}

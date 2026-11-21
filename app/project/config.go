@@ -99,6 +99,11 @@ workers: {}
 #    network: on              # off, localhost, or on
 #    env: [MY_API_KEY]        # variables passed through from your environment
 #    sandbox: on              # off only for workers that sandbox themselves
+#
+#  codex:                     # Codex CLI; it applies its own sandbox
+#    run: [codex, exec, --sandbox, workspace-write, --ephemeral, --color, never, "-"]
+#    timeout: 20m
+#    sandbox: off
 # default_worker: agent       # needed only with more than one worker
 `
 
