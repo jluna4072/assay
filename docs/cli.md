@@ -377,6 +377,22 @@ $ assay contract diff assay/docs.yaml
 
 `--json` prints `contract`, `latest` (0 when unpublished), `changed`, and `diff`, one string per line with its marker.
 
+### `assay contract list`
+
+Lists the contract files in `assay/`, with whether each is valid and whether it's published as is, changed since its latest version, or not published, then the published contracts with their latest version:
+
+```
+$ assay contract list
+Contract files in assay/
+  ✓ assay/docs.yaml     docs · 2 rules · changed since v1
+  ✗ assay/broken.yaml   2 problems
+
+Published contracts
+  docs  v1  2 rules  Documentation
+```
+
+With `--json`, each file has `path`, `valid`, `contract` (`id`, `name`, `rules`) or `problems`, and `published` (`same`, `changed`, or `unpublished`) with `latest`; each contract has `id`, `name`, `latest`, `versions`, and `rules`.
+
 ### `assay contract versions <id>`
 
 Lists published versions, newest first.
@@ -668,6 +684,30 @@ Actions apply to what's selected (or the page you're on), and the key line lists
 Checks and work run in the background while you keep browsing; one check and one work run at a time. Quitting while a check runs abandons it without recording an attempt. Quitting while work started in this window runs asks first (`y`, or `ctrl+c` again), then cancels the run and waits for it to record that; one more `ctrl+c` stops waiting. Work started elsewhere keeps running; stop it where it was started. For other limits, a task file, or `--resume`, use `assay work`. A reviewer with no API key reports the error in the result instead of asking for the key, since the screen belongs to the UI; save keys with `assay reviewer login` first.
 
 The UI follows `NO_COLOR`, works in an 80×24 terminal, and restores the terminal when it exits.
+
+### `assay mcp`
+
+Serves the project to an agent over the [Model Context Protocol](https://modelcontextprotocol.io), on stdin and stdout. Add it to Claude Code from the project directory:
+
+```sh
+claude mcp add assay -- assay mcp
+```
+
+Each tool runs the matching command with `--json` in the project and returns what it prints, followed by a line with the exit code when it isn't 0. A negative verdict (a failed rule, an invalid file) is an ordinary result; a usage or operational error is a tool error.
+
+| Tool | Runs |
+|---|---|
+| `list_contracts` | `assay contract list` |
+| `get_contract` | `assay contract show <contract>` |
+| `validate_contract` | `assay contract validate <path>` (a path inside the project) |
+| `diff_contract` | `assay contract diff <path>` |
+| `check` | `assay check <contract>` |
+| `recheck` | `assay recheck [run]` |
+| `list_runs` | `assay runs [--contract] [--limit]` |
+| `get_run` | `assay show [run] [--attempt] [--evidence]` |
+| `get_evidence` | `assay evidence [run] <rule> [--attempt] [--item]` |
+
+There's no tool to publish: an agent writes the contract file, validates it, and shows you the diff, and you publish it with `assay contract publish` or `p` in the UI. The server's instructions tell the agent this, and that work is done only when a check passes. Reviewer keys come from the environment or the Keychain; the server never asks for one, so a missing key is reported as the rule's error.
 
 ### Run IDs
 
