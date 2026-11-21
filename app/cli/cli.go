@@ -68,6 +68,8 @@ var commands = []command{
 	runsCommand,
 	showRunCommand,
 	evidenceCommand,
+	reviewerListCommand,
+	reviewerTestCommand,
 }
 
 const overview = `harness checks agent work against contracts you publish.

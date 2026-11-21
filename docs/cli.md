@@ -43,9 +43,10 @@ rules:
 | `id`, `name` | Contract identifier and display name |
 | `rules[].id` | Unique rule identifier |
 | `rules[].criterion` | The acceptance criterion in plain words |
-| `rules[].check` | How the rule is checked: `file_exists` or `command_succeeds` |
+| `rules[].check` | How the rule is checked: `file_exists`, `command_succeeds`, or `review` |
 | `rules[].path` | Project-relative path, for `file_exists` |
 | `rules[].command` | Name of an approved command, for `command_succeeds`: the rule passes when it exits with status 0 |
+| `rules[].reviewer` | For `review`: which configured reviewer judges the rule. Without it, the project's default reviewer does. |
 | `rules[].depends_on` | Rules that must pass before this one is checked |
 | `rules[].evidence` | What harness records when it checks the rule (below) |
 
@@ -121,6 +122,80 @@ Toolchains that write caches outside the project need them declared. For Go, `ca
 If the sandbox isn't available (on Linux, for example), commands can't run and their rules report `error`. `sandbox: off` runs them without it; their evidence is then marked unsandboxed (`unsandboxed` in `show --evidence`, `"sandboxed": false` in JSON).
 
 A command with `writes: project` changes the project for rules checked after it in the same attempt. Prefer scratch writes; see `docs/spikes/command-sandbox.md` for how the sandbox was tested.
+
+## Reviewers
+
+Some criteria can't be checked by a program ("the README explains how to install"). A `review` rule sends its criterion and evidence to a reviewer, usually a model, which answers `pass`, `fail`, or `insufficient_evidence`:
+
+```yaml
+  - id: readme-explains-install
+    criterion: README explains how to install and run the project
+    check: review
+    reviewer: careful          # optional; without it, the default reviewer
+    evidence:
+      - file: README.md
+```
+
+A review rule needs at least one evidence item: the reviewer sees exactly what harness recorded, never the project itself.
+
+Reviewers are configured in `.harness/config.yaml`, next to approved commands, so each person chooses the model that reviews their work and a committed contract works with any of them:
+
+```yaml
+reviewers:
+  careful:
+    protocol: command
+    run: [my-reviewer]       # program and arguments; no shell
+    timeout: 2m              # default 2m, at most 1h
+    network: on              # off (default), localhost (a local model), or on
+    env: [MY_API_KEY]        # variables passed through from your environment
+default_reviewer: careful    # needed only with more than one reviewer
+```
+
+With one reviewer, it's the default. `contract validate` (inside a project) and `contract publish` reject review rules whose reviewer isn't configured.
+
+This version supports one protocol, `command`: a program that reads a review request on stdin and writes its verdict on stdout, both JSON. It runs like an approved command (sandbox, cleared environment, timeout), except it can never write to the project. Built-in protocols for decision models such as TypeSafe's Jev, OpenAI-compatible servers (including local ones such as Ollama), and Anthropic's API are planned.
+
+### The review protocol
+
+harness sends one request per rule:
+
+```json
+{
+  "protocol": 1,
+  "rule": {"id": "readme-explains-install", "criterion": "README explains how to install and run the project"},
+  "evidence": [
+    {"item": 1, "kind": "file", "path": "README.md", "size": 31, "sha256": "…", "content": "# Demo\n\nRun make install.\n"}
+  ]
+}
+```
+
+Evidence items carry what `show --evidence` lists (`kind`, `path` or `paths`, `baseline`, `command`, `exitCode`, `timedOut`, `size`, `sha256`) and their content: text in `content`, anything that isn't UTF-8 in `contentBase64`. An absent file is `"absent": true` with no content.
+
+The reviewer prints one JSON object:
+
+```json
+{
+  "protocol": 1,
+  "verdict": "fail",
+  "explanation": "The README describes features but has no install steps.",
+  "cites": [1],
+  "model": "my-model-2",
+  "probability": 0.08
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `protocol` | Required; `1` |
+| `verdict` | Required: `pass`, `fail`, or `insufficient_evidence` |
+| `explanation` | The reviewer's reasoning, shown as the rule's reason and stored verbatim |
+| `cites` | Evidence item numbers the verdict relies on |
+| `model` | Which model answered, for the record |
+| `probability` | Optional, 0 to 1: how likely the criterion is met, for reviewers that estimate it |
+
+Other fields are ignored. **Only `pass` passes**; `insufficient_evidence` fails the rule. Everything else is an `error`, never a pass: a non-zero exit, a timeout, output that isn't exactly one JSON object, a missing or unknown verdict, a citation of an item that wasn't sent, a probability outside 0 to 1, or more than 1 MiB of output. A rule isn't sent for review at all if any of its evidence couldn't be collected or was truncated.
+
+Each review is recorded with the rule: the reviewer, its verdict, explanation, citations, model, and duration, plus the exact request and response as evidence items after the rule's own (`review request to careful`, `review response from careful`), so `harness evidence <rule> --item <n>` shows exactly what the reviewer saw and said.
 
 ## Commands
 
@@ -294,7 +369,7 @@ attempt 3 · passed · 2026-11-19 09:51:02
 
 ### `harness show --evidence`
 
-Adds a numbered line for each evidence item under its rule:
+Adds a numbered line for each evidence item under its rule, and a summary line for reviews:
 
 ```
 attempt 2 · passed · 2026-11-19 10:47:46
@@ -323,6 +398,26 @@ new file mode 100644
 ```
 
 `--item <n>` prints only that item's content, with no header, for piping or saving: `harness evidence guide --item 1 > guide-at-attempt-2.md`. `--json` includes each item's content (as `content`, or `contentBase64` for binary data). It exits 1 if a selected item is an absent file and 2 if one couldn't be collected.
+
+### `harness reviewer list`
+
+Lists configured reviewers, what each runs, and which is the default.
+
+### `harness reviewer test [name]`
+
+Sends a reviewer (the default without a name) two fixed samples, one whose evidence meets the criterion and one whose evidence doesn't, and reports how it judged each. Exits 0 when it passed the first and failed the second, 1 when it judged one wrongly, and 2 when it couldn't answer. Nothing is recorded.
+
+```
+$ harness reviewer test careful
+careful · command protocol · my-reviewer
+
+  ✓ sample that meets the criterion (should pass)
+      pass · model my-model-2 · cites 1 · 1.2s: It greets the reader.
+  ✓ sample that doesn't meet the criterion (should fail)
+      fail · model my-model-2 · cites 1 · 1.1s: It says goodbye, not hello.
+
+careful works: it passed the sample that meets the criterion and failed the one that doesn't.
+```
 
 ### Run IDs
 
@@ -360,7 +455,7 @@ Runs are shown by the first six characters of their ID. Anywhere a run ID is acc
 }
 ```
 
-Run `status` is `ready` (no attempts yet), `passed`, `failed`, or `error`, from the latest attempt. In a git repository, the run has a `baseline` (the commit it started at). Rules with evidence have an `evidence` list with each item's `kind`, `path` or `paths`, `size`, `sha256`, and, when they apply, `baseline`, `files` (diffs), `absent`, `truncated`, and `error`. Command items add `command`, `argv`, `exitCode`, `durationMs`, `sandboxed`, and `timedOut`. `results` keep the contract's rule order. `app/cli/testdata/golden/` holds the exact shapes the tests enforce.
+Run `status` is `ready` (no attempts yet), `passed`, `failed`, or `error`, from the latest attempt. In a git repository, the run has a `baseline` (the commit it started at). Rules with evidence have an `evidence` list with each item's `kind`, `path` or `paths`, `size`, `sha256`, and, when they apply, `baseline`, `files` (diffs), `absent`, `truncated`, and `error`. Command items add `command`, `argv`, `exitCode`, `durationMs`, `sandboxed`, and `timedOut`; review request and response items add `reviewer`. Review rules that reached a reviewer have a `review` object: `reviewer`, `protocol`, `verdict`, `explanation`, `cites`, `model`, `probability`, `requestSha256` (the hash of the exact request), `durationMs`, `sandboxed`, and `error` when there's no verdict. `results` keep the contract's rule order. `app/cli/testdata/golden/` holds the exact shapes the tests enforce.
 
 ## Exit codes
 

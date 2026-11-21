@@ -54,7 +54,7 @@ Backend details: [contract publication](docs/contracts.md) and [persistent runs]
 
 ## Scope
 
-Rules can check that a file exists or that an approved command succeeds, with dependencies between them. Each attempt can record file contents, git diffs, and command output as evidence; commands run under the macOS sandbox. Model reviewers, workers, automatic repairs, MCP access, and releases are future work.
+Rules can check that a file exists, that an approved command succeeds, or that a reviewer you configure (a model behind a program that speaks harness's review protocol) judges the evidence to meet a criterion, with dependencies between them. Each attempt can record file contents, git diffs, and command output as evidence, plus the exact review request and response; commands and reviewers run under the macOS sandbox. Built-in model providers, workers, automatic repairs, MCP access, and releases are future work.
 
 ## Roadmap
 
@@ -62,7 +62,7 @@ Work lands in small pull requests, each reviewed before the next one starts.
 
 1. **Core command line.** Contract files, validation, publishing, runs, and attempts in SQLite; a text view of the dependency graph.
 2. **Evidence collection.** Collect file contents, diffs, and user-approved command results per attempt, and block a pass when required evidence is missing.
-3. **Model review.** Evaluate subjective rules with a reviewer (Jev first, then user-selected local or cloud models); reviewer errors never produce a pass.
+3. **Model review.** Evaluate subjective rules with a reviewer the user chooses: any program speaking harness's review protocol, then built-in support for decision models such as TypeSafe's Jev, OpenAI-compatible and local servers, and Anthropic's API. Reviewer errors never produce a pass.
 4. **Worker and repair loop.** `harness work` runs a worker in a restricted workspace, returns failures as repair context, and retries within attempt and time limits.
 5. **MCP.** `harness mcp` lets outside agents draft contracts, request tasks, and check status. Publishing stays under user control.
 6. **Distribution.** Release binaries and a Homebrew tap, plus `harness doctor` for setup.

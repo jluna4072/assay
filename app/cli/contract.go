@@ -109,7 +109,7 @@ func runPublish(e Env, cmd *command, args []string) int {
 			fmt.Fprintf(e.Stderr, "harness contract publish: %v\n", err)
 			return ExitOperational
 		}
-		result.AddValidation(backend.ValidateCommands(result.Contract, config))
+		result.AddValidation(errors.Join(backend.ValidateCommands(result.Contract, config), backend.ValidateReviewers(result.Contract, config)))
 	}
 	if !result.Valid() {
 		if *asJSON {

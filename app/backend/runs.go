@@ -150,6 +150,19 @@ func (s *Service) EvaluateAttempt(runID string) (Run, error) {
 		}
 		var result RuleResult
 		switch rule.Kind {
+		case ReviewCheck:
+			// The reviewer judges the evidence, so collect all of it first.
+			result = RuleResult{RuleID: rule.ID}
+			for _, spec := range rule.Evidence {
+				result.Evidence = append(result.Evidence, evidence.collect(spec))
+			}
+			review, recorded := evidence.review(rule, result.Evidence)
+			result.Evidence = append(result.Evidence, recorded...)
+			result.Review = &review
+			result.Status, result.Reason = reviewVerdict(review)
+			result.Passed = result.Status == Passed
+			results[id] = result
+			return result
 		case CommandSucceeds:
 			item := evidence.command(rule.Command)
 			result = RuleResult{RuleID: rule.ID, Evidence: []Evidence{item}}

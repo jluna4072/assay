@@ -75,6 +75,25 @@ func ValidateCommands(contract Contract, config Config) error {
 	return errors.Join(problems...)
 }
 
+// ValidateReviewers checks that every review rule's reviewer is configured,
+// or that there's a default for rules that don't name one.
+func ValidateReviewers(contract Contract, config Config) error {
+	var problems []error
+	for i, rule := range contract.Rules {
+		if rule.Kind != ReviewCheck || (rule.Reviewer != "" && !CommandName(rule.Reviewer)) {
+			continue
+		}
+		if _, err := config.Reviewer(rule.Reviewer); err != nil {
+			field := "reviewer"
+			if rule.Reviewer == "" {
+				field = "check"
+			}
+			problems = append(problems, &ValidationError{Rule: i, RuleID: rule.ID, Field: field, Message: err.Error()})
+		}
+	}
+	return errors.Join(problems...)
+}
+
 // projectPath reports whether path is a usable project-relative path.
 func projectPath(path string) bool {
 	return strings.TrimSpace(path) != "" && filepath.IsLocal(path) && !strings.Contains(path, "\\")
@@ -125,8 +144,23 @@ func ValidateContract(contract Contract) error {
 			if rule.Path != "" {
 				report(i, rule.ID, "path", "path isn't used by command_succeeds")
 			}
+		case ReviewCheck:
+			if len(rule.Evidence) == 0 {
+				report(i, rule.ID, "check", "a review needs evidence to judge; list what the reviewer should see under evidence")
+			}
+			if rule.Path != "" {
+				report(i, rule.ID, "path", "path isn't used by review; list files under evidence")
+			}
+			if rule.Command != "" {
+				report(i, rule.ID, "command", "command isn't used by review; list commands under evidence")
+			}
 		default:
 			report(i, rule.ID, "check", "unsupported check %q", rule.Kind)
+		}
+		if rule.Reviewer != "" && rule.Kind != ReviewCheck {
+			report(i, rule.ID, "reviewer", "reviewer is only used by review")
+		} else if rule.Reviewer != "" && !CommandName(rule.Reviewer) {
+			report(i, rule.ID, "reviewer", "reviewer %q isn't a valid reviewer name (letters, digits, '.', '_', '-')", rule.Reviewer)
 		}
 		for _, spec := range rule.Evidence {
 			switch spec.Kind {
