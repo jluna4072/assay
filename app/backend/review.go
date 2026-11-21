@@ -39,6 +39,8 @@ type ReviewerSpec struct {
 	// command (sandbox, cleared environment, timeout), except it can never
 	// write to the project.
 	Command CommandSpec
+	// Decisions configures DecisionsProtocol.
+	Decisions DecisionsSpec
 }
 
 // Describe summarizes what the reviewer runs, for listings.
@@ -46,6 +48,9 @@ func (r ReviewerSpec) Describe() string {
 	switch r.Protocol {
 	case CommandProtocol:
 		return strings.Join(r.Command.Run, " ")
+	case DecisionsProtocol, TypeSafeProtocol:
+		d := r.Decision()
+		return fmt.Sprintf("%s at %s, passes at %.2f", d.Model, d.Endpoint, d.Threshold)
 	}
 	return ""
 }
@@ -118,15 +123,19 @@ type reviewResponse struct {
 
 // reviewCall is one exchange with a reviewer.
 type reviewCall struct {
+	sent      []byte // exactly what was sent; nil if nothing was
 	response  []byte
 	duration  int64
 	sandboxed bool
 }
 
-// reviewer sends a request to a reviewer and returns its raw response. An
-// error means there's no usable response.
+// reviewer is a client for one protocol. call sends a request in the
+// protocol's own form and returns what was sent and the raw response; an
+// error means there's no usable response. parse turns a response into a
+// verdict, or an error.
 type reviewer interface {
-	call(request []byte) (reviewCall, error)
+	call(request ReviewRequest) (reviewCall, error)
+	parse(response []byte, items int, review *Review) error
 }
 
 // reviewerFor returns the client for a configured reviewer.
@@ -134,6 +143,8 @@ func (c *collector) reviewerFor(spec ReviewerSpec, config Config) (reviewer, err
 	switch spec.Protocol {
 	case CommandProtocol:
 		return &commandReviewer{collector: c, spec: spec, sandbox: config.Sandbox}, nil
+	case DecisionsProtocol, TypeSafeProtocol:
+		return &decisionsReviewer{spec: spec, keys: c.keys}, nil
 	}
 	return nil, fmt.Errorf("reviewer %q uses protocol %q, which this harness doesn't support", spec.Name, spec.Protocol)
 }
@@ -164,18 +175,20 @@ func (c *collector) review(rule Rule, items []Evidence) (Review, []Evidence) {
 		review.Error = err.Error()
 		return review, nil
 	}
-	return c.send(review, client, request, len(items))
+	return c.send(review, client, request)
 }
 
 // send makes one review call and records it.
-func (c *collector) send(review Review, client reviewer, request []byte, items int) (Review, []Evidence) {
-	requestItem := Evidence{Kind: ReviewRequestEvidence, Reviewer: review.Reviewer}
-	requestItem.store(request, c.blobs)
-	review.RequestHash = requestItem.SHA256
-	recorded := []Evidence{requestItem}
-
+func (c *collector) send(review Review, client reviewer, request ReviewRequest) (Review, []Evidence) {
 	call, err := client.call(request)
 	review.Duration, review.Sandboxed = call.duration, call.sandboxed
+	var recorded []Evidence
+	if call.sent != nil {
+		requestItem := Evidence{Kind: ReviewRequestEvidence, Reviewer: review.Reviewer}
+		requestItem.store(call.sent, c.blobs)
+		review.RequestHash = requestItem.SHA256
+		recorded = append(recorded, requestItem)
+	}
 	if call.response != nil {
 		responseItem := Evidence{Kind: ReviewResponseEvidence, Reviewer: review.Reviewer}
 		responseItem.store(call.response, c.blobs)
@@ -185,7 +198,7 @@ func (c *collector) send(review Review, client reviewer, request []byte, items i
 		review.Error = err.Error()
 		return review, recorded
 	}
-	if err := parseReview(call.response, items, &review); err != nil {
+	if err := client.parse(call.response, len(request.Evidence), &review); err != nil {
 		review.Error = fmt.Sprintf("%s's response isn't usable: %v", review.Reviewer, err)
 	}
 	return review, recorded
@@ -194,14 +207,14 @@ func (c *collector) send(review Review, client reviewer, request []byte, items i
 // reviewRequest builds the request for rule from its collected evidence.
 // Evidence that couldn't be collected, or was too large to store whole,
 // isn't sent: a reviewer must see everything the rule asks for.
-func (c *collector) reviewRequest(rule Rule, items []Evidence) ([]byte, error) {
+func (c *collector) reviewRequest(rule Rule, items []Evidence) (ReviewRequest, error) {
 	request := ReviewRequest{Protocol: ReviewProtocolVersion, Rule: ReviewRule{ID: rule.ID, Criterion: rule.Criterion}, Evidence: []ReviewEvidence{}}
 	for i, item := range items {
 		switch {
 		case item.Error != "":
-			return nil, fmt.Errorf("evidence item %d (%s) couldn't be collected, so it can't be reviewed: %s", i+1, item.Kind, item.Error)
+			return ReviewRequest{}, fmt.Errorf("evidence item %d (%s) couldn't be collected, so it can't be reviewed: %s", i+1, item.Kind, item.Error)
 		case item.Truncated:
-			return nil, fmt.Errorf("evidence item %d (%s) is larger than %d bytes, so it can't be reviewed whole", i+1, item.Kind, MaxEvidenceBytes)
+			return ReviewRequest{}, fmt.Errorf("evidence item %d (%s) is larger than %d bytes, so it can't be reviewed whole", i+1, item.Kind, MaxEvidenceBytes)
 		}
 		entry := ReviewEvidence{
 			Item: i + 1, Kind: item.Kind, Path: item.Path, Paths: item.Paths, Baseline: item.Baseline,
@@ -214,7 +227,7 @@ func (c *collector) reviewRequest(rule Rule, items []Evidence) ([]byte, error) {
 		if !item.Absent {
 			content, ok := c.blobs[item.Blob]
 			if !ok {
-				return nil, fmt.Errorf("evidence item %d's content is missing", i+1)
+				return ReviewRequest{}, fmt.Errorf("evidence item %d's content is missing", i+1)
 			}
 			if utf8.Valid(content) {
 				entry.Content = string(content)
@@ -224,7 +237,7 @@ func (c *collector) reviewRequest(rule Rule, items []Evidence) ([]byte, error) {
 		}
 		request.Evidence = append(request.Evidence, entry)
 	}
-	return json.Marshal(request)
+	return request, nil
 }
 
 // parseReview checks a reviewer's response and fills in the verdict.
@@ -297,8 +310,16 @@ type commandReviewer struct {
 	sandbox   bool
 }
 
-func (r *commandReviewer) call(request []byte) (reviewCall, error) {
+func (r *commandReviewer) parse(response []byte, items int, review *Review) error {
+	return parseReview(response, items, review)
+}
+
+func (r *commandReviewer) call(request ReviewRequest) (reviewCall, error) {
 	var call reviewCall
+	body, err := json.Marshal(request)
+	if err != nil {
+		return call, err
+	}
 	spec := r.spec.Command
 	spec.Name = r.spec.Name
 	spec.WritesProject = false
@@ -315,12 +336,13 @@ func (r *commandReviewer) call(request []byte) (reviewCall, error) {
 	result, err := runProcess(process{
 		spec: spec, sandbox: r.sandbox, project: r.collector.projectDir, scratch: scratch,
 		cache: filepath.Join(r.collector.projectDir, ".harness", "reviewer-cache", r.spec.Name),
-		stdin: request, stdout: stdout, stderr: stderr,
+		stdin: body, stdout: stdout, stderr: stderr,
 	})
 	call.duration, call.sandboxed = result.duration, result.sandboxed
 	if err != nil {
-		return call, err
+		return call, err // the program didn't start, so nothing was sent
 	}
+	call.sent = body
 	call.response = stdout.Bytes()
 	switch {
 	case result.timedOut:
@@ -385,6 +407,7 @@ func (s ReviewSample) OK() bool {
 // answers are in each sample's Review.
 func (s *Service) TestReviewer(projectDir, name string) (ReviewerSpec, []ReviewSample, error) {
 	c := newCollector(projectDir, "", s.LoadConfig)
+	c.keys = s.Keys
 	defer c.cleanup()
 	config, err := c.config()
 	if err != nil {
@@ -411,7 +434,7 @@ func (s *Service) TestReviewer(projectDir, name string) (ReviewerSpec, []ReviewS
 		if err != nil {
 			return spec, nil, err
 		}
-		samples[i].Review, _ = c.send(Review{Reviewer: spec.Name, Protocol: spec.Protocol}, client, request, 1)
+		samples[i].Review, _ = c.send(Review{Reviewer: spec.Name, Protocol: spec.Protocol}, client, request)
 	}
 	return spec, samples, nil
 }

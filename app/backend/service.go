@@ -35,6 +35,9 @@ type Service struct {
 	// LoadConfig reads a project's local config when an attempt runs an
 	// approved command. Without it, no commands are approved.
 	LoadConfig func(projectDir string) (Config, error)
+	// Keys finds API keys for reviewers that need them. Without it, keys
+	// come only from each reviewer's environment variable.
+	Keys KeySource
 }
 
 func NewService(store Repository) *Service { return &Service{store: store} }

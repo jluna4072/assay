@@ -129,6 +129,7 @@ func (s *Service) EvaluateAttempt(runID string) (Run, error) {
 	}
 	attempt := Attempt{StartedAt: time.Now().UTC(), Status: Passed}
 	evidence := newCollector(run.ProjectDir, run.Baseline, s.LoadConfig)
+	evidence.keys = s.Keys
 	defer evidence.cleanup()
 	rules := make(map[string]Rule)
 	for _, rule := range published.Contract.Rules {

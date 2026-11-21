@@ -153,7 +153,72 @@ default_reviewer: careful    # needed only with more than one reviewer
 
 With one reviewer, it's the default. `contract validate` (inside a project) and `contract publish` reject review rules whose reviewer isn't configured.
 
-This version supports one protocol, `command`: a program that reads a review request on stdin and writes its verdict on stdout, both JSON. It runs like an approved command (sandbox, cleared environment, timeout), except it can never write to the project. Built-in protocols for decision models such as TypeSafe's Jev, OpenAI-compatible servers (including local ones such as Ollama), and Anthropic's API are planned.
+Three protocols are supported:
+
+- `typesafe`: TypeSafe's Jev, called directly with a TypeSafe console key (below).
+- `decisions`: a decision model through an OpenAI-compatible Decisions API, such as Jev through Vercel's AI Gateway with a Vercel key (below).
+- `command`: a program that reads a review request on stdin and writes its verdict on stdout, both JSON. It runs like an approved command (sandbox, cleared environment, timeout), except it can never write to the project.
+
+Built-in protocols for OpenAI-compatible chat servers (including local ones such as Ollama) and Anthropic's API are planned.
+
+### Jev and other decision models
+
+With a key from TypeSafe's console:
+
+```yaml
+reviewers:
+  jev:
+    protocol: typesafe
+    endpoint: https://api.typesafe.ai/v1   # default
+    model: jev-latest                      # default
+    threshold: 0.9                         # default: probability needed to pass
+    key_env: TYPESAFE_API_KEY              # default
+    timeout: 2m                            # default
+```
+
+harness sends `POST <endpoint>/systemone` with the evidence as the `state` and one yes/no (`noul`) question: is this criterion met?
+
+With a key from Vercel's AI Gateway, or another service that offers an OpenAI-compatible Decisions API:
+
+```yaml
+reviewers:
+  jev:
+    protocol: decisions
+    endpoint: https://ai-gateway.vercel.sh/v1   # default
+    model: typesafe-ai/jev                       # default
+    threshold: 0.9                               # default: probability needed to pass
+    key_env: AI_GATEWAY_API_KEY                  # default
+    timeout: 2m                                  # default
+```
+
+harness sends `POST <endpoint>/decisions` with the rule's evidence as JSON input and one yes/no (`predicate`) question.
+
+Keys are specific to the service that issued them: a TypeSafe key works only with `typesafe`, and a Vercel key only with Vercel's endpoint. A key sent to the wrong service is rejected (`api.typesafe.ai rejected the API key (HTTP 401)`), and the message names the service so the mismatch is clear.
+
+Either way, the model answers with the probability that it is. The rule passes when that probability reaches `threshold`; anything lower fails, with the probability in the reason (`jev: probability 0.62 that the criterion is met; passing needs 0.90`). Decision models give no written explanation. A refusal, an answer that isn't a single predicate with a probability between 0 and 1, an HTTP error, or a timeout is an `error`. The endpoint must use https unless it's on this machine. Requests larger than 128 KiB (about the 32,000 tokens Jev reads) aren't sent; the rule is an `error`.
+
+Unlike `command` reviewers, harness makes these requests itself, outside the sandbox, and only to the configured endpoint.
+
+### API keys
+
+A `typesafe` or `decisions` reviewer's key comes from, in order:
+
+1. The variable named by `key_env`, when it's set (for CI, or to override).
+2. Your macOS Keychain, where harness saves keys per API host, so reviewers on the same provider share one.
+3. Nothing, for an endpoint on this machine (a local server).
+
+**You set a key up once.** The first time a review needs a key that isn't set up, and you're at a terminal, harness asks for it (input is hidden), saves it to the Keychain, and carries on with the check:
+
+```
+$ harness check docs
+Reviewer jev needs an API key for api.typesafe.ai, and none is set up yet.
+Paste the key (input is hidden):
+Saved to your Keychain; harness won't ask again on this Mac.
+```
+
+harness never asks when there's no one to answer: when stdin isn't a terminal, or with `--json`. The rule is then an `error` that says how to provide a key. Keys are never written to config, contracts, logs, evidence, or the database; the recorded request doesn't include the `Authorization` header. harness stores keys through Apple's `security` tool, passing the key on its stdin rather than as an argument.
+
+A rejected key (HTTP 401 or 403) is an `error` that says to replace it with `harness reviewer login <name>`.
 
 ### The review protocol
 
@@ -401,7 +466,11 @@ new file mode 100644
 
 ### `harness reviewer list`
 
-Lists configured reviewers, what each runs, and which is the default.
+Lists configured reviewers, what each uses, which is the default, and where each API reviewer's key comes from (`$TYPESAFE_API_KEY`, `keychain`, `not needed`, or `missing`). It never prints a key.
+
+### `harness reviewer login [name]` and `harness reviewer logout [name]`
+
+`login` asks for a reviewer's API key (the default reviewer without a name) and saves it to your Keychain, replacing any saved key; you only need it to set a key up ahead of time or replace one. With stdin not a terminal, it reads the key from stdin: `printf %s "$KEY" | harness reviewer login jev`. `logout` removes the saved key for the reviewer's API host. Command reviewers get keys from the variables listed under `env:` instead.
 
 ### `harness reviewer test [name]`
 

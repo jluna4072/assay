@@ -3,6 +3,7 @@
 package cli
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -35,6 +36,9 @@ type Env struct {
 	Stdout, Stderr io.Writer
 	Dir            string // working directory, where project discovery starts
 	Interactive    bool   // a person is at the terminal (stdin is a TTY)
+	// ReadSecret reads one line without echoing it when a person is at the
+	// terminal, or from stdin otherwise (for piping a key in).
+	ReadSecret func(prompt string) (string, error)
 }
 
 // DefaultEnv returns the environment of the running process.
@@ -45,7 +49,19 @@ func DefaultEnv() Env {
 	}
 	// A real terminal check: /dev/null is also a character device.
 	interactive := term.IsTerminal(int(os.Stdin.Fd()))
-	return Env{Stdout: os.Stdout, Stderr: os.Stderr, Dir: dir, Interactive: interactive}
+	return Env{Stdout: os.Stdout, Stderr: os.Stderr, Dir: dir, Interactive: interactive, ReadSecret: func(prompt string) (string, error) {
+		if interactive {
+			fmt.Fprint(os.Stderr, prompt)
+			secret, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Fprintln(os.Stderr)
+			return string(secret), err
+		}
+		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		if errors.Is(err, io.EOF) && line != "" {
+			err = nil
+		}
+		return line, err
+	}}
 }
 
 type command struct {
@@ -70,6 +86,8 @@ var commands = []command{
 	evidenceCommand,
 	reviewerListCommand,
 	reviewerTestCommand,
+	reviewerLoginCommand,
+	reviewerLogoutCommand,
 }
 
 const overview = `harness checks agent work against contracts you publish.

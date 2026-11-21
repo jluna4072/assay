@@ -39,7 +39,7 @@ go test -race ./...
 go build ./...
 ```
 
-Tests need no network, credentials, or external tools. `go test ./cli -update` regenerates the JSON golden files in `app/cli/testdata/golden/` when an output change is intended.
+Tests need no network, credentials, or external tools; Keychain tests use a throwaway keychain, never yours. `go test ./cli -update` regenerates the JSON golden files in `app/cli/testdata/golden/` when an output change is intended.
 
 | Package | Role |
 |---|---|
@@ -49,12 +49,13 @@ Tests need no network, credentials, or external tools. `go test ./cli -update` r
 | `project` | Finding a project's `.harness/` directory |
 | `backend` | Contracts, validation, publishing, runs, and checks |
 | `storage` | SQLite persistence |
+| `keychain` | Saving reviewer API keys in the macOS Keychain |
 
 Backend details: [contract publication](docs/contracts.md) and [persistent runs](docs/runs.md).
 
 ## Scope
 
-Rules can check that a file exists, that an approved command succeeds, or that a reviewer you configure (a model behind a program that speaks harness's review protocol) judges the evidence to meet a criterion, with dependencies between them. Each attempt can record file contents, git diffs, and command output as evidence, plus the exact review request and response; commands and reviewers run under the macOS sandbox. Built-in model providers, workers, automatic repairs, MCP access, and releases are future work.
+Rules can check that a file exists, that an approved command succeeds, or that a reviewer you configure (TypeSafe's Jev or another decision model, or any program that speaks harness's review protocol) judges the evidence to meet a criterion, with dependencies between them. Each attempt can record file contents, git diffs, and command output as evidence, plus the exact review request and response; commands and reviewers run under the macOS sandbox. More model providers, workers, automatic repairs, MCP access, and releases are future work.
 
 ## Roadmap
 
