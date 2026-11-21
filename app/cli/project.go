@@ -80,6 +80,7 @@ func openProject(e Env, cmd *command, dir string) (*session, int) {
 	}
 	service := backend.NewService(store)
 	service.LoadConfig = project.LoadConfig
+	service.Keys = newKeys(e, true)
 	return &session{project: p, store: store, service: service}, ExitOK
 }
 

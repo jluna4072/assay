@@ -159,7 +159,7 @@ default_reviewer: missing
   noproto:
     run: [x]
   future:
-    protocol: decisions
+    protocol: openai
   norun:
     protocol: command
 default_reviewer: missing
@@ -170,9 +170,106 @@ default_reviewer: missing
 	}
 	want = []string{
 		`default_reviewer "missing" isn't one of the reviewers configured here`,
-		`reviewer "future": protocol "decisions" isn't supported by this harness; it supports: command`,
-		`reviewer "noproto": protocol is required; this harness supports: command`,
+		`reviewer "future": protocol "openai" isn't supported by this harness; it supports: command, decisions, typesafe`,
+		`reviewer "noproto": protocol is required; this harness supports: command, decisions, typesafe`,
 		`reviewer "norun": run needs a program and its arguments, like [go, test, ./...]`,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("problems:\n%s", strings.Join(got, "\n"))
+	}
+}
+
+func TestParseDecisionsReviewers(t *testing.T) {
+	config, problems := ParseConfig([]byte(`reviewers:
+  jev:
+    protocol: decisions
+  direct:
+    protocol: typesafe
+    threshold: 0.8
+  local:
+    protocol: decisions
+    endpoint: http://localhost:8080/v1/
+    model: my-decider
+    key_env: LOCAL_KEY
+    threshold: 0.75
+    timeout: 10s
+`))
+	if len(problems) != 0 {
+		t.Fatalf("problems: %v", problems)
+	}
+	jev := config.Reviewers["jev"].Decisions.WithDefaults()
+	if jev.Endpoint != backend.DefaultDecisionsEndpoint || jev.Model != "typesafe-ai/jev" || jev.KeyEnv != "AI_GATEWAY_API_KEY" || jev.Threshold != 0.9 || jev.Timeout != 2*time.Minute {
+		t.Fatalf("jev defaults: %+v", jev)
+	}
+	if config.Reviewers["jev"].Decisions.Host() != "ai-gateway.vercel.sh" || config.Reviewers["jev"].Decisions.Local() {
+		t.Fatal("jev host")
+	}
+	direct := config.Reviewers["direct"].Decision()
+	if direct.Endpoint != "https://api.typesafe.ai/v1" || direct.Model != "jev-latest" || direct.KeyEnv != "TYPESAFE_API_KEY" || direct.Threshold != 0.8 || direct.Host() != "api.typesafe.ai" {
+		t.Fatalf("typesafe defaults: %+v", direct)
+	}
+	local := config.Reviewers["local"].Decisions.WithDefaults()
+	if local.Endpoint != "http://localhost:8080/v1" || local.Model != "my-decider" || local.KeyEnv != "LOCAL_KEY" || local.Threshold != 0.75 || local.Timeout != 10*time.Second || !config.Reviewers["local"].Decisions.Local() {
+		t.Fatalf("local: %+v", local)
+	}
+
+	_, problems = ParseConfig([]byte(`reviewers:
+  plain:
+    protocol: decisions
+    endpoint: http://api.example.com/v1
+  odd:
+    protocol: decisions
+    endpoint: "not a url"
+    key_env: "bad name"
+    threshold: 1.5
+    run: [x]
+  cmd:
+    protocol: command
+    run: [x]
+    model: m
+`))
+	got := make([]string, len(problems))
+	for i, p := range problems {
+		got[i] = p.String()
+	}
+	want := []string{
+		`reviewer "cmd": model isn't used by the command protocol`,
+		`reviewer "odd": endpoint must be a URL like https://ai-gateway.vercel.sh/v1`,
+		`reviewer "odd": key_env "bad name" isn't an environment variable name`,
+		`reviewer "odd": run isn't used by the decisions protocol`,
+		`reviewer "odd": threshold must be more than 0 and at most 1, like 0.9`,
+		`reviewer "plain": endpoint must use https unless it's on this machine`,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("problems:\n%s", strings.Join(got, "\n"))
+	}
+}
+
+func TestTimeoutsAreAtLeastOneSecond(t *testing.T) {
+	_, problems := ParseConfig([]byte(`commands:
+  quick:
+    run: [x]
+    timeout: 500ms
+  ok:
+    run: [x]
+    timeout: 1s
+reviewers:
+  fast:
+    protocol: typesafe
+    timeout: 1ms
+  prog:
+    protocol: command
+    run: [x]
+    timeout: 999ms
+`))
+	got := make([]string, len(problems))
+	for i, p := range problems {
+		got[i] = p.String()
+	}
+	want := []string{
+		`command "quick": timeout must be a duration between 1s and 1h0m0s, like 5m`,
+		`reviewer "fast": timeout must be a duration between 1s and 1h0m0s, like 2m`,
+		`reviewer "prog": timeout must be a duration between 1s and 1h0m0s, like 5m`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("problems:\n%s", strings.Join(got, "\n"))

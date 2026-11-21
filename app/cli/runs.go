@@ -466,6 +466,9 @@ func runRecheck(e Env, cmd *command, args []string) int {
 
 // evaluate records a new attempt for run and prints it.
 func evaluate(e Env, cmd *command, s *session, run backend.Run, asJSON bool) int {
+	if asJSON {
+		s.service.Keys = newKeys(e, false) // never stop to ask when output is for a program
+	}
 	run, err := s.service.EvaluateAttempt(run.ID)
 	if err != nil {
 		fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)

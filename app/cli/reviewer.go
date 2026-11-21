@@ -49,12 +49,16 @@ Exit codes: 0 both samples judged as expected, 1 a sample was judged wrongly,
 }
 
 type reviewerJSON struct {
-	Name     string   `json:"name"`
-	Protocol string   `json:"protocol"`
-	Default  bool     `json:"default"`
-	Run      []string `json:"run,omitempty"`
-	Network  string   `json:"network,omitempty"`
-	Timeout  string   `json:"timeout,omitempty"`
+	Name      string   `json:"name"`
+	Protocol  string   `json:"protocol"`
+	Default   bool     `json:"default"`
+	Run       []string `json:"run,omitempty"`
+	Network   string   `json:"network,omitempty"`
+	Endpoint  string   `json:"endpoint,omitempty"`
+	Model     string   `json:"model,omitempty"`
+	Threshold float64  `json:"threshold,omitempty"`
+	Key       string   `json:"key,omitempty"` // where its API key comes from: $VAR, keychain, not needed, or missing
+	Timeout   string   `json:"timeout"`
 }
 
 func runReviewerList(e Env, cmd *command, args []string) int {
@@ -91,6 +95,11 @@ func runReviewerList(e Env, cmd *command, args []string) int {
 			}
 			item.Run, item.Network, item.Timeout = spec.Command.Run, string(spec.Command.Network), timeout.String()
 		}
+		if backend.UsesAPIKey(spec.Protocol) {
+			d := spec.Decision()
+			item.Endpoint, item.Model, item.Threshold, item.Timeout = d.Endpoint, d.Model, d.Threshold, d.Timeout.String()
+			item.Key = keySource(spec)
+		}
 		list = append(list, item)
 	}
 	sort.Slice(list, func(i, j int) bool { return list[i].Name < list[j].Name })
@@ -107,17 +116,22 @@ func runReviewerList(e Env, cmd *command, args []string) int {
 		return ExitOK
 	}
 	table := tabwriter.NewWriter(e.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(table, "NAME\tPROTOCOL\tRUNS\tNETWORK\tTIMEOUT")
+	fmt.Fprintln(table, "NAME\tPROTOCOL\tUSES\tKEY\tTIMEOUT")
 	for _, r := range list {
 		name := r.Name
 		if r.Default {
 			name += " (default)"
 		}
-		run := strings.Join(r.Run, " ")
-		if len([]rune(run)) > 48 {
-			run = string([]rune(run)[:47]) + "…"
+		uses, key := strings.Join(r.Run, " "), "-"
+		if backend.UsesAPIKey(backend.ReviewProtocol(r.Protocol)) {
+			uses, key = fmt.Sprintf("%s ≥ %.2f", r.Model, r.Threshold), r.Key
+		} else if r.Network != "" {
+			uses += " (network " + r.Network + ")"
 		}
-		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", name, r.Protocol, run, r.Network, r.Timeout)
+		if len([]rune(uses)) > 48 {
+			uses = string([]rune(uses)[:47]) + "…"
+		}
+		fmt.Fprintf(table, "%s\t%s\t%s\t%s\t%s\n", name, r.Protocol, uses, key, r.Timeout)
 	}
 	table.Flush()
 	return ExitOK
@@ -152,6 +166,9 @@ func runReviewerTest(e Env, cmd *command, args []string) int {
 	}
 	defer s.Close()
 
+	if *asJSON {
+		s.service.Keys = newKeys(e, false)
+	}
 	spec, samples, err := s.service.TestReviewer(s.project.Root, name)
 	if err != nil {
 		fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)

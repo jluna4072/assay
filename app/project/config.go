@@ -56,13 +56,22 @@ commands: {}
 # Reviewers judge "check: review" rules: a model reads the rule's criterion
 # and evidence and answers pass, fail, or insufficient_evidence. Contracts
 # name a reviewer (reviewer: careful) or use the default, so each person
-# chooses the model. A command reviewer is a program that reads a review
-# request as JSON on stdin and writes its verdict as JSON on stdout; it runs
-# like an approved command, but can never write to the project. Test one
-# with "harness reviewer test <name>".
+# chooses the model. Test one with "harness reviewer test <name>".
 reviewers: {}
-#  careful:
-#    protocol: command
+#  jev:                       # TypeSafe's Jev, with a TypeSafe console key
+#    protocol: typesafe       # https://api.typesafe.ai/v1, model jev-latest
+#    threshold: 0.9           # probability needed to pass (default)
+#    # The key comes from TYPESAFE_API_KEY, or the Keychain: harness asks
+#    # for it once, the first time it's needed.
+#
+#  jev-gateway:               # Jev through Vercel's AI Gateway, with a Vercel key
+#    protocol: decisions      # any OpenAI-compatible Decisions API
+#    endpoint: https://ai-gateway.vercel.sh/v1   # (default)
+#    model: typesafe-ai/jev   # (default); key from AI_GATEWAY_API_KEY or the Keychain
+#
+#  careful:                   # a program that reads a review request as JSON
+#    protocol: command        # on stdin and writes its verdict on stdout
+
 #    run: [my-reviewer]       # program and arguments; no shell
 #    timeout: 2m              # at most 1h
 #    network: on              # off, localhost (a local model), or on
@@ -79,12 +88,18 @@ type configFile struct {
 }
 
 type reviewerFile struct {
-	Protocol string   `yaml:"protocol"`
-	Run      []string `yaml:"run"`
-	Timeout  string   `yaml:"timeout"`
-	Network  string   `yaml:"network"`
-	Env      []string `yaml:"env"`
-	Caches   []string `yaml:"caches"`
+	Protocol string `yaml:"protocol"`
+	Timeout  string `yaml:"timeout"`
+	// command
+	Run     []string `yaml:"run"`
+	Network string   `yaml:"network"`
+	Env     []string `yaml:"env"`
+	Caches  []string `yaml:"caches"`
+	// decisions
+	Endpoint  string   `yaml:"endpoint"`
+	Model     string   `yaml:"model"`
+	KeyEnv    string   `yaml:"key_env"`
+	Threshold *float64 `yaml:"threshold"`
 }
 
 type commandFile struct {
@@ -177,13 +192,49 @@ func ParseConfig(data []byte) (backend.Config, []contractfile.Problem) {
 	for name, reviewer := range file.Reviewers {
 		prefix := fmt.Sprintf("reviewer %q: ", name)
 		spec := backend.ReviewerSpec{Name: name, Protocol: backend.ReviewProtocol(reviewer.Protocol)}
+		unused := func(protocol string, keys map[string]bool) {
+			for key, set := range keys {
+				if set {
+					add("%s%s isn't used by the %s protocol", prefix, key, protocol)
+				}
+			}
+		}
 		switch spec.Protocol {
 		case backend.CommandProtocol:
 			spec.Command = checkProgram(name, prefix, reviewer.Run, reviewer.Timeout, reviewer.Network, reviewer.Env, reviewer.Caches, add)
+			unused("command", map[string]bool{"endpoint": reviewer.Endpoint != "", "model": reviewer.Model != "", "key_env": reviewer.KeyEnv != "", "threshold": reviewer.Threshold != nil})
+		case backend.DecisionsProtocol, backend.TypeSafeProtocol:
+			if !backend.CommandName(name) {
+				add("%sname must be letters, digits, '.', '_', or '-'", prefix)
+			}
+			unused(string(spec.Protocol), map[string]bool{"run": len(reviewer.Run) > 0, "network": reviewer.Network != "", "env": len(reviewer.Env) > 0, "caches": len(reviewer.Caches) > 0})
+			decisions := backend.DecisionsSpec{Endpoint: reviewer.Endpoint, Model: reviewer.Model, KeyEnv: reviewer.KeyEnv}
+			if reviewer.Endpoint != "" {
+				if err := backend.CheckEndpoint(reviewer.Endpoint); err != nil {
+					add("%s%v", prefix, err)
+				}
+			}
+			if reviewer.KeyEnv != "" && !variableName.MatchString(reviewer.KeyEnv) {
+				add("%skey_env %q isn't an environment variable name", prefix, reviewer.KeyEnv)
+			}
+			if t := reviewer.Threshold; t != nil {
+				if *t <= 0 || *t > 1 {
+					add("%sthreshold must be more than 0 and at most 1, like 0.9", prefix)
+				}
+				decisions.Threshold = *t
+			}
+			if reviewer.Timeout != "" {
+				timeout, err := time.ParseDuration(reviewer.Timeout)
+				if err != nil || timeout < time.Second || timeout > MaxCommandTimeout {
+					add("%stimeout must be a duration between 1s and %s, like 2m", prefix, MaxCommandTimeout)
+				}
+				decisions.Timeout = timeout
+			}
+			spec.Decisions = decisions
 		case "":
-			add("%sprotocol is required; this harness supports: command", prefix)
+			add("%sprotocol is required; this harness supports: command, decisions, typesafe", prefix)
 		default:
-			add("%sprotocol %q isn't supported by this harness; it supports: command", prefix, reviewer.Protocol)
+			add("%sprotocol %q isn't supported by this harness; it supports: command, decisions, typesafe", prefix, reviewer.Protocol)
 		}
 		config.Reviewers[name] = spec
 	}
@@ -212,7 +263,7 @@ func checkProgram(name, prefix string, run []string, timeout, network string, en
 	}
 	if timeout != "" {
 		parsed, err := time.ParseDuration(timeout)
-		if err != nil || parsed <= 0 || parsed > MaxCommandTimeout {
+		if err != nil || parsed < time.Second || parsed > MaxCommandTimeout {
 			add("%stimeout must be a duration between 1s and %s, like 5m", prefix, MaxCommandTimeout)
 		}
 		spec.Timeout = parsed

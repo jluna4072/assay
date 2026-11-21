@@ -99,6 +99,7 @@ type collector struct {
 	projectDir string
 	baseline   string
 	loadConfig func(projectDir string) (Config, error)
+	keys       KeySource // API keys for reviewers that need them
 	blobs      map[string][]byte
 	diffs      map[string]Evidence
 	commands   map[string]Evidence
