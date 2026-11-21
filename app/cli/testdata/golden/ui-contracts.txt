@@ -21,4 +21,4 @@ assay  Contracts  Runs
   Published contracts
   docs  latest v1 · 1 version · Documentation
 
-↑↓ move · enter open · esc back · tab runs · r reload · ? help · q quit
+e edit · p publish · v validate · enter open · tab runs · ? help · q quit

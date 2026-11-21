@@ -22,7 +22,7 @@ assay check example                          # fails if there's no README.md
 touch README.md
 assay recheck                                # passes; attempt 1's failure is kept
 assay show                                   # every attempt, with reasons
-assay                                        # browse contracts, runs, and evidence
+assay                                        # browse, publish, and check in a full-screen UI
 ```
 
 Contracts are YAML files in `assay/`, committed with the project. Published versions, runs, and attempts live in `.assay/assay.db`, which `init` adds to `.gitignore`. Every command accepts `--json`, and exit codes report the verdict (0 passed, 1 failed, 2 couldn't run, 64 usage error), so `assay check` works as a gate in scripts and CI.
@@ -56,7 +56,7 @@ Backend details: [contract publication](docs/contracts.md) and [persistent runs]
 
 ## Scope
 
-Rules can check that a file exists, that an approved command succeeds, or that a reviewer you configure (TypeSafe's Jev, a Claude or OpenAI model, a model running locally through Ollama, or any program that speaks assay's review protocol) judges the evidence to meet a criterion, with dependencies between them. Each attempt can record file contents, git diffs, and command output as evidence, plus the exact review request and response; commands and reviewers run under the macOS sandbox. `assay work` has a worker (an agent or any program) do a task in a git worktree, checks the result, and sends back what failed until every rule passes or a limit is reached; the result is a branch you review and merge. Typing `assay` at a terminal opens a full-screen view for browsing contracts, runs, and evidence. MCP access and releases are future work.
+Rules can check that a file exists, that an approved command succeeds, or that a reviewer you configure (TypeSafe's Jev, a Claude or OpenAI model, a model running locally through Ollama, or any program that speaks assay's review protocol) judges the evidence to meet a criterion, with dependencies between them. Each attempt can record file contents, git diffs, and command output as evidence, plus the exact review request and response; commands and reviewers run under the macOS sandbox. `assay work` has a worker (an agent or any program) do a task in a git worktree, checks the result, and sends back what failed until every rule passes or a limit is reached; the result is a branch you review and merge. Typing `assay` at a terminal opens a full-screen view for browsing contracts, runs, and evidence, and for validating, publishing, editing, checking, and rechecking with a key. MCP access and releases are future work.
 
 ## Roadmap
 

@@ -21,4 +21,4 @@ assay  Contracts  Runs
 
 
 
-↑↓ move · enter open · esc back · tab runs · r reload · ? help · q quit
+e edit · p publish · v validate · enter open · tab runs · ? help · q quit

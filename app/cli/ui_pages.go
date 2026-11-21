@@ -89,7 +89,7 @@ func (d *uiData) contractsPage() (*uiPage, error) {
 				line += fmt.Sprintf("changed since v%d", p.Version)
 			}
 		}
-		rows = append(rows, uiRow{text: line, open: func() (*uiPage, error) { return d.filePage(name) }})
+		rows = append(rows, uiRow{text: line, target: uiTarget{file: name}, open: func() (*uiPage, error) { return d.filePage(name) }})
 	}
 
 	rows = append(rows, blank, heading("Published contracts"))
@@ -103,7 +103,7 @@ func (d *uiData) contractsPage() (*uiPage, error) {
 	for _, c := range published {
 		p := latest[c.ID]
 		line := fmt.Sprintf("%s  latest v%d · %s · %s", padRight(c.ID, width), p.Version, plural(counts[c.ID], "version"), c.Name)
-		rows = append(rows, uiRow{text: line, open: func() (*uiPage, error) { return d.contractPage(c.ID) }})
+		rows = append(rows, uiRow{text: line, target: uiTarget{contract: c.ID}, open: func() (*uiPage, error) { return d.contractPage(c.ID) }})
 	}
 	return newPage("Contracts", rows, d.contractsPage), nil
 }
@@ -122,13 +122,13 @@ func (d *uiData) filePage(name string) (*uiPage, error) {
 		for _, problem := range result.Problems {
 			rows = append(rows, uiRow{text: rel + ":" + problem.String()})
 		}
-		rows = append(rows, blank, uiRow{text: styleDim.Render("Fix the file, then press r to check it again.")})
-		return newPage(name, rows, func() (*uiPage, error) { return d.filePage(name) }), nil
+		rows = append(rows, blank, uiRow{text: styleDim.Render("Press e to edit the file; it's checked again when the editor closes.")})
+		return newPage(name, rows, func() (*uiPage, error) { return d.filePage(name) }).about(uiTarget{file: name}), nil
 	}
 	c := result.Contract
 	rows = append(rows, uiRow{text: statusStyle("passed", "✓ ") + rel + ": " + c.ID + " · " + c.Name}, blank)
 	rows = append(rows, ruleRows(c, "Rules")...)
-	return newPage(name, rows, func() (*uiPage, error) { return d.filePage(name) }), nil
+	return newPage(name, rows, func() (*uiPage, error) { return d.filePage(name) }).about(uiTarget{file: name}), nil
 }
 
 // ruleRows draws a contract's rules as the dependency tree from
@@ -178,7 +178,7 @@ func (d *uiData) contractPage(id string) (*uiPage, error) {
 	for i := len(versions) - 1; i >= 0; i-- {
 		v := versions[i]
 		line := fmt.Sprintf("v%-3d published %s · %s", v.Version, v.PublishedAt.Local().Format("2006-01-02 15:04"), plural(len(v.Contract.Rules), "rule"))
-		rows = append(rows, uiRow{text: line, open: func() (*uiPage, error) { return d.versionPage(id, v.Version) }})
+		rows = append(rows, uiRow{text: line, target: uiTarget{contract: id, version: v.Version}, open: func() (*uiPage, error) { return d.versionPage(id, v.Version) }})
 	}
 	rows = append(rows, blank)
 	runs, err := listRuns(d.s)
@@ -202,7 +202,7 @@ func (d *uiData) contractPage(id string) (*uiPage, error) {
 	rows = append(rows, runRows...)
 	rows = append(rows, blank)
 	rows = append(rows, ruleRows(latest.Contract, fmt.Sprintf("Rules in v%d", latest.Version))...)
-	return newPage(id, rows, func() (*uiPage, error) { return d.contractPage(id) }), nil
+	return newPage(id, rows, func() (*uiPage, error) { return d.contractPage(id) }).about(uiTarget{contract: id}), nil
 }
 
 func (d *uiData) versionPage(id string, version int) (*uiPage, error) {
@@ -216,7 +216,7 @@ func (d *uiData) versionPage(id string, version int) (*uiPage, error) {
 		blank,
 	}
 	rows = append(rows, ruleRows(v.Contract, "Rules")...)
-	return newPage(fmt.Sprintf("v%d", version), rows, func() (*uiPage, error) { return d.versionPage(id, version) }), nil
+	return newPage(fmt.Sprintf("v%d", version), rows, func() (*uiPage, error) { return d.versionPage(id, version) }).about(uiTarget{contract: id, version: version}), nil
 }
 
 // runsPage lists every run, newest first, as "assay runs" does.
@@ -268,7 +268,7 @@ func (d *uiData) runRows(runs []backend.Run) ([]uiRow, error) {
 				line = line[:at+1] + statusStyle(status, status) + line[at+1+len(status):]
 			}
 		}
-		rows = append(rows, uiRow{text: line, open: func() (*uiPage, error) { return d.runPage(run.ID) }})
+		rows = append(rows, uiRow{text: line, target: uiTarget{run: run.ID}, open: func() (*uiPage, error) { return d.runPage(run.ID) }})
 	}
 	return rows, nil
 }
@@ -322,7 +322,7 @@ func (d *uiData) runPage(id string) (*uiPage, error) {
 	if len(run.Attempts) == 0 {
 		rows = append(rows, blank, uiRow{text: styleDim.Render("no attempts yet")})
 	}
-	return newPage("run "+shortID(run.ID), rows, func() (*uiPage, error) { return d.runPage(id) }), nil
+	return newPage("run "+shortID(run.ID), rows, func() (*uiPage, error) { return d.runPage(id) }).about(uiTarget{run: id}), nil
 }
 
 // resultPage shows a rule's result in one attempt with all its evidence.
@@ -347,7 +347,7 @@ func (d *uiData) resultPage(run backend.Run, attempt int, r backend.RuleResult) 
 		rows = append(rows, d.blobRows(item)...)
 	}
 	title := fmt.Sprintf("%s · attempt %d", r.RuleID, attempt)
-	return newPage(title, rows, nil), nil
+	return newPage(title, rows, nil).about(uiTarget{run: run.ID}), nil
 }
 
 // workerPage shows what a worker was given and what it printed.
@@ -357,7 +357,7 @@ func (d *uiData) workerPage(run backend.Run, attempt int, w backend.WorkerRun) (
 	rows = append(rows, d.blobRows(w.Prompt)...)
 	rows = append(rows, blank, heading("Output · "+formatSize(w.Output.Size)))
 	rows = append(rows, d.blobRows(w.Output)...)
-	return newPage(fmt.Sprintf("worker · attempt %d", attempt), rows, nil), nil
+	return newPage(fmt.Sprintf("worker · attempt %d", attempt), rows, nil).about(uiTarget{run: run.ID}), nil
 }
 
 // blobRows is an evidence item's stored content, one row per line.

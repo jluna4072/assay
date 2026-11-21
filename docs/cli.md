@@ -359,6 +359,24 @@ docs@2 unchanged: the file matches the latest published version
 
 Publishing is the contract owner's decision. Without a terminal on stdin (a script, CI, or an agent running shell commands), `publish` refuses with exit 64 unless `--yes` is passed. An invalid file is reported like `validate` and exits 1.
 
+### `assay contract diff <file>`
+
+Shows what publishing a file would change: the latest published version and the file, both in the contract file format, with removed lines marked `-` and added ones `+`, and long unchanged stretches shown as `…`. Nothing is published. It exits 0 when the file matches the latest version and 1 when publishing would change something (or the file has problems, reported like `validate`); a contract that was never published shows every line as added.
+
+```
+$ assay contract diff assay/docs.yaml
+--- docs@1 (published 2026-11-20 14:02)
++++ assay/docs.yaml
+  …
+    - id: guide
+-     criterion: Project has a guide
++     criterion: Project has a user guide
+      check: file_exists
+      path: docs/guide.md
+```
+
+`--json` prints `contract`, `latest` (0 when unpublished), `changed`, and `diff`, one string per line with its marker.
+
 ### `assay contract versions <id>`
 
 Lists published versions, newest first.
@@ -632,9 +650,21 @@ It opens with a welcome panel: the assay logo in large letters (in terminals at 
 - **Contracts** lists the YAML files in `assay/` (✓ valid, ✗ with problems), each with whether it's published as is, changed since its latest version, or not published, then the published contracts. Open a file to see its problems or its rules; open a published contract to see its versions, its runs, and the dependency tree of its rules.
 - **Runs** lists runs newest first, as `assay runs` does. Open a run to see its attempts (newest first), each attempt's worker for work runs, and every rule's result; open a result to see its reason, the review, and the content of each evidence item, or a worker line to see its prompt and output.
 
-Keys: `↑`/`↓` (or `k`/`j`) move, `enter` opens, `esc` goes back, `tab` (or `1`/`2`) switches between Contracts and Runs, `pgup`/`pgdn` and `home`/`end` scroll, `r` reloads from the database, `?` lists the keys, `q` quits from a list, `ctrl+c` quits from anywhere.
+Keys: `↑`/`↓` (or `k`/`j`) move, `enter` opens, `esc` goes back, `tab` (or `1`/`2`) switches between Contracts and Runs, `pgup`/`pgdn` and `home`/`end` scroll, `ctrl+r` reloads from the database, `?` lists the keys, `q` quits from a list, `ctrl+c` quits from anywhere.
 
-The UI changes nothing: publish, check, and work with the commands. It follows `NO_COLOR`, works in an 80×24 terminal, and restores the terminal when it exits.
+Actions apply to what's selected (or the page you're on), and the key line lists the ones that do:
+
+| Key | On | Does |
+|---|---|---|
+| `v` | a contract file | validates it, as `assay contract validate` does |
+| `p` | a contract file | shows what would change, as `assay contract diff` does, and publishes on `y`; `n` or `esc` publishes nothing |
+| `e` | a contract file | opens it in `$VISUAL` or `$EDITOR` (which may include arguments, like `code --wait`), or `vi`, and validates it when the editor closes |
+| `c` | a published contract or version | starts a run and checks the project, as `assay check` does, then opens the run |
+| `r` | a run | adds an attempt, as `assay recheck` does |
+
+Checks run in the background while you keep browsing; one runs at a time, and quitting while one runs abandons it without recording an attempt. A reviewer with no API key reports the error in the result instead of asking for the key, since the screen belongs to the UI; save keys with `assay reviewer login` first. Work runs are started with `assay work`.
+
+The UI follows `NO_COLOR`, works in an 80×24 terminal, and restores the terminal when it exits.
 
 ### Run IDs
 

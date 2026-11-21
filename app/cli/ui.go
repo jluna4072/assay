@@ -9,14 +9,24 @@ import (
 	"github.com/charmbracelet/x/ansi"
 )
 
-// The interactive terminal UI. It only shows what the backend already
-// records, through the same helpers the text commands use; it decides
-// nothing itself.
+// The interactive terminal UI. It shows what the backend records, through
+// the same helpers the text commands use, and its actions call the same
+// functions the commands do; it decides nothing itself.
 
 // uiRow is one line of a page. Rows with open are selectable.
 type uiRow struct {
-	text string // may hold styling
-	open func() (*uiPage, error)
+	text   string // may hold styling
+	open   func() (*uiPage, error)
+	target uiTarget // what actions on this row act on
+}
+
+// uiTarget is what a row or page is about, for the actions that act on
+// it. At most one of file, contract, and run is set.
+type uiTarget struct {
+	file     string // a contract file in assay/
+	contract string // a published contract
+	version  int    // with contract: one version, or 0 for the latest
+	run      string
 }
 
 // uiPage is one screen: a title for the breadcrumb and its lines.
@@ -27,6 +37,14 @@ type uiPage struct {
 	offset int // first visible row
 	// build makes the page again from the database, for reloading.
 	build func() (*uiPage, error)
+	// target is what the page is about, for actions when the selected row
+	// isn't about anything.
+	target uiTarget
+}
+
+func (p *uiPage) about(target uiTarget) *uiPage {
+	p.target = target
+	return p
 }
 
 func newPage(title string, rows []uiRow, build func() (*uiPage, error)) *uiPage {
@@ -60,6 +78,13 @@ type uiModel struct {
 	height int
 	help   bool
 	status string // the last error, shown above the keys
+	note   string // the last action's outcome, shown in the same place
+	// busy describes a check that is running, while one is; actions wait
+	// for it to finish.
+	busy string
+	// confirm is the question the current page asks, such as whether to
+	// publish the diff it shows.
+	confirm *uiConfirm
 	// welcome is the panel shown when the UI opens, until the first time
 	// something is opened or the tab changes.
 	welcome *uiWelcome
@@ -155,6 +180,10 @@ func (m *uiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.keepVisible()
 	case tea.KeyPressMsg:
 		return m, m.key(msg.String())
+	case uiDoneMsg:
+		m.done(msg)
+	case uiEditedMsg:
+		m.edited(msg)
 	}
 	return m, nil
 }
@@ -180,7 +209,10 @@ func (m *uiModel) key(key string) tea.Cmd {
 		}
 		return nil
 	}
-	m.status = ""
+	if m.confirm != nil {
+		return m.answer(key)
+	}
+	m.status, m.note = "", ""
 	p := m.page()
 	switch key {
 	case "?":
@@ -193,6 +225,7 @@ func (m *uiModel) key(key string) tea.Cmd {
 			return nil
 		}
 		m.stack = m.stack[:len(m.stack)-1]
+		m.reload() // an action may have changed what the page shows
 	case "tab", "shift+tab":
 		m.welcome = nil
 		m.tab = (m.tab + 1) % len(tabNames)
@@ -212,8 +245,10 @@ func (m *uiModel) key(key string) tea.Cmd {
 		}
 		m.welcome = nil
 		m.stack = append(m.stack, next)
-	case "r":
+	case "ctrl+r":
 		m.reload()
+	case "v", "p", "e", "c", "r":
+		return m.act(key)
 	case "down", "j":
 		m.move(1)
 	case "up", "k":
@@ -394,15 +429,18 @@ func (m *uiModel) render() string {
 	lines = lines[:top+h]
 
 	status := ""
-	if m.status != "" {
+	switch {
+	case m.status != "":
 		status = styleError.Render(oneLine(m.status))
-	} else if p := m.page(); !m.help && len(p.rows) > h {
+	case m.busy != "":
+		status = styleAccent.Render("◆ " + m.busy)
+	case m.note != "":
+		status = oneLine(m.note)
+	}
+	if p := m.page(); status == "" && !m.help && len(p.rows) > h {
 		status = styleDim.Render(fmtRange(p.offset, min(len(p.rows), p.offset+h), len(p.rows)))
 	}
-	keys := "↑↓ move · enter open · esc back · tab " + strings.ToLower(tabNames[(m.tab+1)%len(tabNames)]) + " · r reload · ? help · q quit"
-	if m.help {
-		keys = "esc close help · ctrl+c quit"
-	}
+	keys := m.keys()
 	lines = append(lines, status, styleDim.Render(keys))
 	for i, line := range lines {
 		lines[i] = ansi.Truncate(line, w, "…")
@@ -428,25 +466,30 @@ func fmtRange(from, to, total int) string {
 }
 
 func helpLines() []string {
-	keys := [][2]string{
+	section := func(title string, keys [][2]string) []string {
+		lines := []string{styleHeading.Render("  " + title)}
+		for _, k := range keys {
+			lines = append(lines, "  "+padRight(k[0], 11)+" "+k[1])
+		}
+		return lines
+	}
+	lines := section("Move", [][2]string{
 		{"↑ ↓  k j", "move between items"},
 		{"enter → l", "open the selected item"},
 		{"esc ← h", "go back"},
-		{"pgup pgdn", "scroll a page"},
-		{"home end", "jump to the top or bottom"},
+		{"pgup pgdn", "scroll a page; home end jump to the top or bottom"},
 		{"tab, 1 2", "switch between Contracts and Runs"},
-		{"r", "reload from the database"},
-		{"?", "show or hide this help"},
-		{"q", "go back, or quit from a list"},
-		{"ctrl+c", "quit"},
-	}
-	lines := []string{styleHeading.Render("  Keys"), ""}
-	for _, k := range keys {
-		lines = append(lines, "  "+padRight(k[0], 11)+" "+k[1])
-	}
-	return append(lines, "",
-		"  The UI only shows what assay has recorded. To change anything, use",
-		"  the commands: assay contract publish, assay check, assay work, …")
+		{"ctrl+r", "reload from the database"},
+		{"q", "go back, or quit from a list; ctrl+c quits from anywhere"},
+	})
+	lines = append(lines, "")
+	return append(lines, section("Act on what's selected", [][2]string{
+		{"v", "validate a contract file"},
+		{"p", "publish a contract file, after showing what changes"},
+		{"e", "edit a contract file in $EDITOR, then validate it"},
+		{"c", "check the project against a published contract"},
+		{"r", "recheck a run, adding an attempt"},
+	})...)
 }
 
 func padRight(s string, width int) string {
