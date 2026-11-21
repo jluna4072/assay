@@ -65,23 +65,10 @@ func runValidate(e Env, cmd *command, args []string) int {
 	reports := make([]validateFileJSON, 0, len(files))
 	// Inside a project, also check that commands are approved and reviewers
 	// configured in its config.
-	var config *backend.Config
-	var configErr error
-	if p, err := project.Find(e.Dir); err == nil {
-		loaded, err := project.LoadConfig(p.Root)
-		config, configErr = &loaded, err
-	}
+	config := findConfig(e.Dir)
 	for _, path := range files {
 		report := validateFileJSON{Path: path, Problems: []contractfile.Problem{}}
-		result, err := contractfile.Check(resolve(e, path))
-		if err == nil && result.Valid() && usesConfig(result.Contract) {
-			switch {
-			case configErr != nil:
-				err = configErr
-			case config != nil:
-				result.AddValidation(errors.Join(backend.ValidateCommands(result.Contract, *config), backend.ValidateReviewers(result.Contract, *config)))
-			}
-		}
+		result, err := config.check(resolve(e, path))
 		switch {
 		case err != nil:
 			report.Error = err.Error()
@@ -159,4 +146,34 @@ func usesConfig(contract backend.Contract) bool {
 		}
 	}
 	return false
+}
+
+// projectConfig is the config of the project around a directory, if any,
+// for checking that contracts use approved commands and known reviewers.
+type projectConfig struct {
+	config *backend.Config
+	err    error
+}
+
+func findConfig(dir string) projectConfig {
+	p, err := project.Find(dir)
+	if err != nil {
+		return projectConfig{}
+	}
+	loaded, err := project.LoadConfig(p.Root)
+	return projectConfig{&loaded, err}
+}
+
+// check reads and validates a contract file, including against the config.
+func (c projectConfig) check(path string) (contractfile.Result, error) {
+	result, err := contractfile.Check(path)
+	if err == nil && result.Valid() && usesConfig(result.Contract) {
+		switch {
+		case c.err != nil:
+			err = c.err
+		case c.config != nil:
+			result.AddValidation(errors.Join(backend.ValidateCommands(result.Contract, *c.config), backend.ValidateReviewers(result.Contract, *c.config)))
+		}
+	}
+	return result, err
 }

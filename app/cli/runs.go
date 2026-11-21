@@ -306,26 +306,9 @@ var severity = map[backend.ResultStatus]int{
 // printResults lists an attempt's rule results, most severe first, with a
 // line per recorded evidence item when withEvidence is set.
 func printResults(w io.Writer, attempt backend.Attempt, withEvidence bool) {
-	results := append([]backend.RuleResult(nil), attempt.Results...)
-	sort.SliceStable(results, func(i, j int) bool { return severity[results[i].Status] < severity[results[j].Status] })
-	width := 0
+	results, width := sortedResults(attempt)
 	for _, r := range results {
-		width = max(width, len(r.RuleID))
-	}
-	for _, r := range results {
-		mark := statusMarks[r.Status]
-		if mark == "" {
-			mark = "?"
-		}
-		reason := oneLine(r.Reason)
-		if r.Status == backend.Blocked {
-			reason = "blocked: " + reason
-		}
-		if reason == "" {
-			fmt.Fprintf(w, "  %s %s\n", mark, r.RuleID)
-		} else {
-			fmt.Fprintf(w, "  %s %-*s   %s\n", mark, width, r.RuleID, reason)
-		}
+		fmt.Fprintf(w, "  %s %s\n", statusMark(r.Status), resultLine(r, width))
 		if withEvidence {
 			if r.Review != nil && r.Review.Error == "" {
 				fmt.Fprintf(w, "      review by %s · %s\n", r.Review.Reviewer, describeReview(*r.Review))
@@ -335,6 +318,37 @@ func printResults(w io.Writer, attempt backend.Attempt, withEvidence bool) {
 			}
 		}
 	}
+}
+
+// sortedResults returns an attempt's results, most severe first, and the
+// width of the longest rule ID.
+func sortedResults(attempt backend.Attempt) ([]backend.RuleResult, int) {
+	results := append([]backend.RuleResult(nil), attempt.Results...)
+	sort.SliceStable(results, func(i, j int) bool { return severity[results[i].Status] < severity[results[j].Status] })
+	width := 0
+	for _, r := range results {
+		width = max(width, len(r.RuleID))
+	}
+	return results, width
+}
+
+func statusMark(status backend.ResultStatus) string {
+	if mark := statusMarks[status]; mark != "" {
+		return mark
+	}
+	return "?"
+}
+
+// resultLine is a rule's ID, padded to width, and the reason for its result.
+func resultLine(r backend.RuleResult, width int) string {
+	reason := oneLine(r.Reason)
+	if r.Status == backend.Blocked {
+		reason = "blocked: " + reason
+	}
+	if reason == "" {
+		return r.RuleID
+	}
+	return fmt.Sprintf("%-*s   %s", width, r.RuleID, reason)
 }
 
 // describeEvidence summarizes an evidence item on one line.

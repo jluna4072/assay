@@ -1,0 +1,24 @@
+assay  Contracts  Runs  ›  run SHORT
+────────────────────────────────────────────────────────────────────────────────
+  run SHORT · docs@1
+  started TIME at COMMIT · passed on attempt 2
+  
+  attempt 2 · passed · TIME
+› ✓ readme
+  ✓ guide
+  
+  attempt 1 · failed · TIME
+  ✗ guide    docs/guide.md does not exist
+  ✓ readme
+
+
+
+
+
+
+
+
+
+
+
+↑↓ move · enter open · esc back · tab contracts · r reload · ? help · q quit

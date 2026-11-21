@@ -1,0 +1,24 @@
+╭──────────────────────────────────────────────────────────────╮
+│  █████╗ ███████╗███████╗ █████╗ ██╗   ██╗                    │
+│ ██╔══██╗██╔════╝██╔════╝██╔══██╗╚██╗ ██╔╝                    │
+│ ███████║███████╗███████╗███████║ ╚████╔╝                     │
+│ ██╔══██║╚════██║╚════██║██╔══██║  ╚██╔╝                      │
+│ ██║  ██║███████║███████║██║  ██║   ██║                       │
+│ ╚═╝  ╚═╝╚══════╝╚══════╝╚═╝  ╚═╝   ╚═╝                       │
+│                                                              │
+│ Welcome to assay  vTEST                                      │
+│   ? for keys · tab for runs · enter to open                  │
+│   project: …ith-a-rather-long-name-that-does-not-fit-the-box │
+│   3 contract files · 1 published · 1 run · last run: passed  │
+╰──────────────────────────────────────────────────────────────╯
+assay  Contracts  Runs
+────────────────────────────────────────────────────────────────────────────────
+  Contract files in assay/
+› ✗ broken.yaml   2 problems
+  ✓ docs.yaml     docs · 2 rules · published as v1
+  ✓ example.yaml  example · 1 rule · not published
+  
+  Published contracts
+  docs  latest v1 · 1 version · Documentation
+
+↑↓ move · enter open · esc back · tab runs · r reload · ? help · q quit

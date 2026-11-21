@@ -1,0 +1,24 @@
+assay  Contracts  Runs  ›  broken.yaml
+────────────────────────────────────────────────────────────────────────────────
+  ✗ assay/broken.yaml: 2 problems
+  
+  assay/broken.yaml:4:5: rule "a": acceptance criterion is required
+  assay/broken.yaml:4:5: rule "a": path must be a relative path inside the proj…
+  
+  Fix the file, then press r to check it again.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+↑↓ move · enter open · esc back · tab runs · r reload · ? help · q quit

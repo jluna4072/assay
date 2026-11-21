@@ -623,6 +623,19 @@ careful · command protocol · my-reviewer
 careful works: it passed the sample that meets the criterion and failed the one that doesn't.
 ```
 
+### `assay ui [run]`
+
+A full-screen view of the project for browsing what assay has recorded. Running `assay` with no arguments does the same when stdin and stdout are both terminals; piped or redirected, it prints the usage overview and exits 64 as before. With a run ID (any unique prefix), it opens that run. Outside a project it offers to run `assay init` first.
+
+It opens with a welcome panel: the assay logo in large letters (in terminals at least 24 rows tall), the version, the project, and a count of contract files, published contracts, and runs with how the last run went. The panel goes away once you open something or switch tabs, and isn't shown in terminals shorter than 20 rows or when opening a run directly.
+
+- **Contracts** lists the YAML files in `assay/` (✓ valid, ✗ with problems), each with whether it's published as is, changed since its latest version, or not published, then the published contracts. Open a file to see its problems or its rules; open a published contract to see its versions, its runs, and the dependency tree of its rules.
+- **Runs** lists runs newest first, as `assay runs` does. Open a run to see its attempts (newest first), each attempt's worker for work runs, and every rule's result; open a result to see its reason, the review, and the content of each evidence item, or a worker line to see its prompt and output.
+
+Keys: `↑`/`↓` (or `k`/`j`) move, `enter` opens, `esc` goes back, `tab` (or `1`/`2`) switches between Contracts and Runs, `pgup`/`pgdn` and `home`/`end` scroll, `r` reloads from the database, `?` lists the keys, `q` quits from a list, `ctrl+c` quits from anywhere.
+
+The UI changes nothing: publish, check, and work with the commands. It follows `NO_COLOR`, works in an 80×24 terminal, and restores the terminal when it exits.
+
 ### Run IDs
 
 Runs are shown by the first six characters of their ID. Anywhere a run ID is accepted, any unique prefix works, in either case. An ambiguous prefix lists the matching runs and exits 64.
