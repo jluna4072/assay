@@ -275,3 +275,46 @@ reviewers:
 		t.Fatalf("problems:\n%s", strings.Join(got, "\n"))
 	}
 }
+
+func TestParseWorkers(t *testing.T) {
+	config, problems := ParseConfig([]byte(`workers:
+  codex:
+    run: [codex, exec, "-"]
+    timeout: 20m
+    network: on
+    env: [OPENAI_API_KEY]
+    sandbox: off
+  boxed:
+    run: [my-agent]
+default_worker: codex
+`))
+	if len(problems) != 0 {
+		t.Fatalf("problems: %v", problems)
+	}
+	codex, boxed := config.Workers["codex"], config.Workers["boxed"]
+	if codex.Sandbox || strings.Join(codex.Command.Run, " ") != "codex exec -" || codex.Command.Timeout != 20*time.Minute || codex.Command.Network != backend.NetworkOn || !boxed.Sandbox {
+		t.Fatalf("workers: %+v %+v", codex, boxed)
+	}
+	if spec, err := config.Worker(""); err != nil || spec.Name != "codex" {
+		t.Fatalf("default: %+v %v", spec, err)
+	}
+
+	_, problems = ParseConfig([]byte(`workers:
+  bad:
+    run: []
+    sandbox: maybe
+default_worker: nobody
+`))
+	got := make([]string, len(problems))
+	for i, p := range problems {
+		got[i] = p.String()
+	}
+	want := []string{
+		`default_worker "nobody" isn't one of the workers configured here`,
+		`worker "bad": run needs a program and its arguments, like [go, test, ./...]`,
+		`worker "bad": sandbox must be on or off, not "maybe"`,
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("problems:\n%s", strings.Join(got, "\n"))
+	}
+}

@@ -433,6 +433,73 @@ Each rule ends in one of four states. Rules needing attention are listed first.
 | ⊘ | `blocked` | A rule it depends on didn't pass, so it wasn't checked |
 | ! | `error` | The check couldn't run (for example, a path escapes the project) |
 
+### `harness work <id>[@version] --task <text>`
+
+Has a worker do a task, then checks the result and sends back what failed until every rule passes or a limit is reached:
+
+```
+$ harness work fix --task "Add a README and make the tests pass"
+work fix@1 · run lvmru6 · worker fake
+workspace .harness/workspaces/lvmru6… · branch harness/lvmru6…
+
+attempt 1 of 3 · running fake
+  │ done (I'm sure everything passes!)
+  fake exited 0 after 148ms, 77 B output
+  committed the workspace as 0956359
+  ✗ tests    go-test exited with status 1
+  ✓ readme
+
+attempt 2 of 3 · running fake
+  │ fixing what failed
+  fake exited 0 after 21ms, 96 B output
+  committed the workspace as 8e58ab1
+  ✓ readme
+  ✓ tests
+
+ACCEPTED · fix@1 · run lvmru6 · every rule passed on attempt 2
+branch harness/lvmru6… · workspace .harness/workspaces/lvmru6…
+Review the changes with: git diff cac35df...harness/lvmru6…
+Then merge the branch yourself; harness never merges.
+```
+
+1. **Workspace.** harness makes a git worktree of the project's last commit under `.harness/workspaces/<run>`, on a new branch `harness/<run>`. Uncommitted changes in your checkout aren't included, and your checkout isn't touched.
+2. **Worker.** It runs the worker in the workspace and writes the prompt to its stdin: the task, the contract's rules and how each is checked, and the attempt number.
+3. **Check.** When the worker exits, harness checks the workspace exactly as `harness check` would, with evidence. What the worker says about its own work counts for nothing.
+4. **Commit.** It commits the workspace to the run's branch (hooks and signing skipped), so each attempt is a commit.
+5. **Repair.** If rules failed, the next attempt's prompt lists each failed or blocked rule with its reason (a reviewer's explanation, a command's exit status) and the last 4 KiB of a failed command's output, and says which rules passed.
+6. **Stop.** The run ends with one of these outcomes:
+
+| Outcome | When | Exit code |
+|---|---|---|
+| `accepted` | every rule passed | 0 |
+| `rejected` | `--max-attempts` (default 3) attempts failed | 1 |
+| `timed_out` | `--timeout` (default 30m) for the whole run was reached | 1 |
+| `cancelled` | you pressed Ctrl-C; the worker is stopped and the workspace kept | 1 |
+| `error` | the worker exited with an error or couldn't start, or a check couldn't run | 2 |
+
+harness never merges the branch. Review it (`git diff <start>...harness/<run>`) and merge it yourself. Progress, including the worker's output (`--quiet` hides it), goes to stderr; the result goes to stdout, or one JSON object with `--json`. `--task-file <path>` reads the task from a file (`-` for stdin), and `--worker <name>` picks a worker.
+
+`harness show` prints a work run's task, worker, outcome, branch, and each attempt's worker line. `harness evidence [run] --prompt` prints exactly what the worker was told in an attempt (`--attempt <n>`), and `--output` what it printed.
+
+### Workers
+
+Workers are programs configured in `.harness/config.yaml`, like approved commands:
+
+```yaml
+workers:
+  agent:
+    run: [my-agent, --auto]   # gets the prompt on stdin, runs in the workspace
+    timeout: 20m              # per attempt; default 20m, and never past the run's --timeout
+    network: on               # off (default), localhost, or on
+    env: [OPENAI_API_KEY]     # variables passed through from your environment
+    sandbox: on               # default on; see below
+default_worker: agent         # needed only with more than one worker
+```
+
+With `sandbox: on`, a worker runs under the macOS sandbox like an approved command: it can write only in its workspace, a scratch directory, and its caches, never to your checkout or harness's state; it reads no credentials; and its network is limited by `network`. Because the workspace's git data lives in your repository's `.git`, a sandboxed worker can read git history but can't commit; harness commits for it.
+
+macOS sandboxes can't be nested, so a worker that sandboxes itself (Codex does) needs `sandbox: off`, and is then only as contained as its own sandbox makes it. Attempts by unsandboxed workers are marked `unsandboxed`.
+
 ### `harness recheck [run]`
 
 Adds an attempt to a run after you've changed the project. Earlier attempts are kept. Without a run ID it uses the most recent run.

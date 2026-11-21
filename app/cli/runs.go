@@ -87,6 +87,32 @@ Flags:
 
 // JSON shapes for runs. These are the documented --json output, separate
 // from the backend's storage types so either can change independently.
+type workJSON struct {
+	Task        string     `json:"task"`
+	Worker      string     `json:"worker"`
+	Workspace   string     `json:"workspace"`
+	Branch      string     `json:"branch"`
+	MaxAttempts int        `json:"maxAttempts"`
+	TimeoutMs   int64      `json:"timeoutMs"`
+	Outcome     string     `json:"outcome"`
+	Reason      string     `json:"reason,omitempty"`
+	FinishedAt  *time.Time `json:"finishedAt,omitempty"`
+}
+
+type workerJSON struct {
+	Worker    string       `json:"worker"`
+	Argv      []string     `json:"argv"`
+	ExitCode  int          `json:"exitCode"`
+	TimedOut  bool         `json:"timedOut,omitempty"`
+	Cancelled bool         `json:"cancelled,omitempty"`
+	Duration  int64        `json:"durationMs"`
+	Sandboxed bool         `json:"sandboxed"`
+	Prompt    evidenceJSON `json:"prompt"`
+	Output    evidenceJSON `json:"output"`
+	Commit    string       `json:"commit,omitempty"`
+	Error     string       `json:"error,omitempty"`
+}
+
 type runJSON struct {
 	ID         string        `json:"id"`
 	ShortID    string        `json:"shortId"`
@@ -97,6 +123,7 @@ type runJSON struct {
 	Status     string        `json:"status"`
 	CreatedAt  time.Time     `json:"createdAt"`
 	Attempts   []attemptJSON `json:"attempts"`
+	Work       *workJSON     `json:"work,omitempty"`
 }
 
 type attemptJSON struct {
@@ -105,6 +132,7 @@ type attemptJSON struct {
 	StartedAt   time.Time    `json:"startedAt"`
 	CompletedAt time.Time    `json:"completedAt"`
 	Results     []resultJSON `json:"results"`
+	Worker      *workerJSON  `json:"worker,omitempty"`
 }
 
 type resultJSON struct {
@@ -155,8 +183,17 @@ func toRunJSON(run backend.Run) runJSON {
 		ID: strings.ToLower(run.ID), ShortID: shortID(run.ID), Contract: run.ContractID, Version: run.Version,
 		ProjectDir: run.ProjectDir, Baseline: run.Baseline, Status: run.Status, CreatedAt: run.CreatedAt, Attempts: []attemptJSON{},
 	}
+	if w := run.Work; w != nil {
+		out.Work = &workJSON{Task: w.Task, Worker: w.Worker, Workspace: w.Workspace, Branch: w.Branch, MaxAttempts: w.MaxAttempts, TimeoutMs: w.Timeout, Outcome: string(w.Outcome), Reason: w.Reason, FinishedAt: w.FinishedAt}
+	}
 	for _, a := range run.Attempts {
 		attempt := attemptJSON{Number: a.Number, Status: string(a.Status), StartedAt: a.StartedAt, CompletedAt: a.CompletedAt, Results: []resultJSON{}}
+		if w := a.Worker; w != nil {
+			attempt.Worker = &workerJSON{
+				Worker: w.Worker, Argv: w.Argv, ExitCode: w.ExitCode, TimedOut: w.TimedOut, Cancelled: w.Cancelled, Duration: w.Duration,
+				Sandboxed: w.Sandboxed, Prompt: toEvidenceJSON(w.Prompt), Output: toEvidenceJSON(w.Output), Commit: w.Commit, Error: w.Error,
+			}
+		}
 		for _, r := range a.Results {
 			result := resultJSON{Rule: r.RuleID, Status: string(r.Status), Reason: r.Reason}
 			if r.Review != nil {
@@ -246,6 +283,7 @@ func attemptExit(status backend.ResultStatus) int {
 }
 
 var statusMarks = map[backend.ResultStatus]string{
+	backend.Cancelled:        "–",
 	backend.Passed:           "✓",
 	backend.Failed:           "✗",
 	backend.Blocked:          "⊘",
@@ -620,8 +658,18 @@ func runShowRun(e Env, cmd *command, args []string) int {
 		started += " at " + shortCommit(run.Baseline)
 	}
 	fmt.Fprintf(e.Stdout, "%s · %s\n", started, runStatusLine(run))
+	if w := run.Work; w != nil {
+		fmt.Fprintf(e.Stdout, "work by %s · %s", w.Worker, strings.ReplaceAll(string(w.Outcome), "_", " "))
+		if w.Reason != "" {
+			fmt.Fprintf(e.Stdout, ": %s", w.Reason)
+		}
+		fmt.Fprintf(e.Stdout, "\nbranch %s · workspace %s\ntask: %s\n", w.Branch, relative(run.ProjectDir, w.Workspace), oneLine(w.Task))
+	}
 	for _, attempt := range attempts {
 		fmt.Fprintf(e.Stdout, "\nattempt %d · %s · %s\n", attempt.Number, attempt.Status, attempt.StartedAt.Local().Format("2006-01-02 15:04:05"))
+		if attempt.Worker != nil {
+			fmt.Fprintf(e.Stdout, "  %s\n", describeWorker(*attempt.Worker))
+		}
 		printResults(e.Stdout, attempt, *withEvidence)
 	}
 	if *withEvidence {

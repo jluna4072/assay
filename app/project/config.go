@@ -88,6 +88,18 @@ reviewers: {}
 #    network: on              # off, localhost (a local model), or on
 #    env: [MY_API_KEY]        # variables passed through from your environment
 # default_reviewer: careful   # needed only with more than one reviewer
+
+# Workers do tasks for "harness work": a program that gets the task and the
+# rules on stdin and changes files in a workspace (a git worktree of the
+# last commit). harness checks the result and sends back what failed.
+workers: {}
+#  agent:
+#    run: [my-agent, --auto]  # program and arguments; no shell
+#    timeout: 20m             # per attempt
+#    network: on              # off, localhost, or on
+#    env: [MY_API_KEY]        # variables passed through from your environment
+#    sandbox: on              # off only for workers that sandbox themselves
+# default_worker: agent       # needed only with more than one worker
 `
 
 type configFile struct {
@@ -96,6 +108,17 @@ type configFile struct {
 	Commands        map[string]commandFile  `yaml:"commands"`
 	Reviewers       map[string]reviewerFile `yaml:"reviewers"`
 	DefaultReviewer string                  `yaml:"default_reviewer"`
+	Workers         map[string]workerFile   `yaml:"workers"`
+	DefaultWorker   string                  `yaml:"default_worker"`
+}
+
+type workerFile struct {
+	Run     []string `yaml:"run"`
+	Timeout string   `yaml:"timeout"`
+	Network string   `yaml:"network"`
+	Env     []string `yaml:"env"`
+	Caches  []string `yaml:"caches"`
+	Sandbox *string  `yaml:"sandbox"`
 }
 
 type reviewerFile struct {
@@ -267,6 +290,26 @@ func ParseConfig(data []byte) (backend.Config, []contractfile.Problem) {
 			add("%sprotocol %q isn't supported by this harness; it supports: command, typesafe, decisions, openai, anthropic", prefix, reviewer.Protocol)
 		}
 		config.Reviewers[name] = spec
+	}
+	for name, worker := range file.Workers {
+		prefix := fmt.Sprintf("worker %q: ", name)
+		spec := backend.WorkerSpec{Name: name, Command: checkProgram(name, prefix, worker.Run, worker.Timeout, worker.Network, worker.Env, worker.Caches, add), Sandbox: true}
+		if worker.Sandbox != nil {
+			switch strings.ToLower(*worker.Sandbox) {
+			case "on", "true":
+			case "off", "false":
+				spec.Sandbox = false
+			default:
+				add("%ssandbox must be on or off, not %q", prefix, *worker.Sandbox)
+			}
+		}
+		config.Workers[name] = spec
+	}
+	if file.DefaultWorker != "" {
+		if _, ok := file.Workers[file.DefaultWorker]; !ok {
+			add("default_worker %q isn't one of the workers configured here", file.DefaultWorker)
+		}
+		config.DefaultWorker = file.DefaultWorker
 	}
 	if file.DefaultReviewer != "" {
 		if _, ok := file.Reviewers[file.DefaultReviewer]; !ok {

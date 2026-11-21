@@ -12,7 +12,7 @@ import (
 
 var evidenceCommand = command{
 	name:    "evidence",
-	args:    "[run] <rule>",
+	args:    "[run] <rule> | [run] --prompt | [run] --output",
 	summary: "Print the evidence recorded for a rule",
 	details: `
 Prints what harness recorded for a rule when it checked it: file contents,
@@ -23,9 +23,14 @@ recent run; without --attempt, the latest attempt.
 Each item is printed under a header line. With --item, only that item's
 content is printed, with no header, so it can be piped or saved.
 
+For runs made by "harness work", --prompt prints what the worker was told
+in an attempt and --output what it printed.
+
 Flags:
   --attempt <n>     Use attempt n
   --item <n>        Print only item n (numbered as in "harness show --evidence")
+  --prompt          Print the worker's prompt for the attempt (work runs)
+  --output          Print the worker's output for the attempt (work runs)
   --json            Print one JSON object instead of text
 ` + projectFlagHelp + `
 
@@ -48,9 +53,14 @@ func runEvidence(e Env, cmd *command, args []string) int {
 	projectDir := fs.String("project", "", "")
 	attemptNumber := fs.Int("attempt", 0, "")
 	itemNumber := fs.Int("item", 0, "")
+	prompt := fs.Bool("prompt", false, "")
+	workerOutput := fs.Bool("output", false, "")
 	positional, code, ok := parseFlags(e, cmd, fs, args)
 	if !ok {
 		return code
+	}
+	if *prompt || *workerOutput {
+		return printWorkerLog(e, cmd, *projectDir, positional, *attemptNumber, *prompt, *workerOutput)
 	}
 	var prefix, ruleID string
 	switch len(positional) {
@@ -179,4 +189,63 @@ func runEvidence(e Env, cmd *command, args []string) int {
 		}
 	}
 	return exit
+}
+
+// printWorkerLog prints a work run attempt's worker prompt or output.
+func printWorkerLog(e Env, cmd *command, projectDir string, positional []string, attemptNumber int, prompt, workerOutput bool) int {
+	if prompt && workerOutput {
+		fmt.Fprintln(e.Stderr, "harness evidence: use --prompt or --output, not both")
+		return ExitUsage
+	}
+	if len(positional) > 1 {
+		fmt.Fprintln(e.Stderr, "harness evidence: with --prompt or --output, name at most a run")
+		return ExitUsage
+	}
+	if attemptNumber < 0 {
+		fmt.Fprintln(e.Stderr, "harness evidence: --attempt must be a positive number")
+		return ExitUsage
+	}
+	s, code := openProject(e, cmd, projectDir)
+	if s == nil {
+		return code
+	}
+	defer s.Close()
+	prefix := ""
+	if len(positional) == 1 {
+		prefix = positional[0]
+	}
+	run, code := findRun(e, cmd, s, prefix)
+	if code != ExitOK {
+		return code
+	}
+	if run.Work == nil || len(run.Attempts) == 0 {
+		fmt.Fprintf(e.Stderr, "harness evidence: run %s wasn't made by \"harness work\", so it has no worker to show\n", shortID(run.ID))
+		return ExitUsage
+	}
+	attempt := run.Attempts[len(run.Attempts)-1]
+	if attemptNumber > 0 {
+		if attemptNumber > len(run.Attempts) {
+			fmt.Fprintf(e.Stderr, "harness evidence: run %s has %s\n", shortID(run.ID), plural(len(run.Attempts), "attempt"))
+			return ExitUsage
+		}
+		attempt = run.Attempts[attemptNumber-1]
+	}
+	if attempt.Worker == nil {
+		fmt.Fprintf(e.Stderr, "harness evidence: attempt %d has no worker record\n", attempt.Number)
+		return ExitOperational
+	}
+	item := attempt.Worker.Output
+	if prompt {
+		item = attempt.Worker.Prompt
+	}
+	content, err := s.service.GetEvidence(item.Blob)
+	if err != nil {
+		fmt.Fprintf(e.Stderr, "harness evidence: %v\n", err)
+		return ExitOperational
+	}
+	e.Stdout.Write(content)
+	if item.Truncated {
+		fmt.Fprintf(e.Stderr, "harness evidence: only the first %s of %s were kept\n", formatSize(backend.MaxEvidenceBytes), formatSize(item.Size))
+	}
+	return ExitOK
 }
