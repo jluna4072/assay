@@ -1,10 +1,10 @@
-// Command harness is the harness command line.
+// Command assay is the assay command line.
 package main
 
 import (
 	"os"
 
-	"harness/cli"
+	"assay/cli"
 )
 
 func main() {

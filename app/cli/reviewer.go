@@ -7,8 +7,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"harness/backend"
-	"harness/project"
+	"assay/backend"
+	"assay/project"
 )
 
 var reviewerListCommand = command{
@@ -16,7 +16,7 @@ var reviewerListCommand = command{
 	args:    "",
 	summary: "List the reviewers configured for this project",
 	details: `
-Lists the reviewers in .harness/config.yaml: what each one runs, and which
+Lists the reviewers in .assay/config.yaml: what each one runs, and which
 one reviews rules that don't name a reviewer.
 
 Flags:
@@ -70,7 +70,7 @@ func runReviewerList(e Env, cmd *command, args []string) int {
 		return code
 	}
 	if len(rest) > 0 {
-		fmt.Fprintf(e.Stderr, "harness %s: unexpected argument %q\n", cmd.name, rest[0])
+		fmt.Fprintf(e.Stderr, "assay %s: unexpected argument %q\n", cmd.name, rest[0])
 		return ExitUsage
 	}
 	s, code := openProject(e, cmd, *projectDir)
@@ -80,7 +80,7 @@ func runReviewerList(e Env, cmd *command, args []string) int {
 	defer s.Close()
 	config, err := project.LoadConfig(s.project.Root)
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)
+		fmt.Fprintf(e.Stderr, "assay %s: %v\n", cmd.name, err)
 		return ExitOperational
 	}
 
@@ -159,7 +159,7 @@ func runReviewerTest(e Env, cmd *command, args []string) int {
 		return code
 	}
 	if len(names) > 1 {
-		fmt.Fprintf(e.Stderr, "harness %s: name at most one reviewer\n", cmd.name)
+		fmt.Fprintf(e.Stderr, "assay %s: name at most one reviewer\n", cmd.name)
 		return ExitUsage
 	}
 	name := ""
@@ -177,7 +177,7 @@ func runReviewerTest(e Env, cmd *command, args []string) int {
 	}
 	spec, samples, err := s.service.TestReviewer(s.project.Root, name)
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)
+		fmt.Fprintf(e.Stderr, "assay %s: %v\n", cmd.name, err)
 		return ExitOperational
 	}
 	exit := ExitOK
@@ -228,7 +228,7 @@ func runReviewerTest(e Env, cmd *command, args []string) int {
 	case ExitNegative:
 		fmt.Fprintf(e.Stdout, "%s answered, but judged a sample wrongly. Check its model and prompt before relying on it.\n", spec.Name)
 	default:
-		fmt.Fprintf(e.Stdout, "%s couldn't review the samples. Fix the error above, then run \"harness reviewer test %s\" again.\n", spec.Name, spec.Name)
+		fmt.Fprintf(e.Stdout, "%s couldn't review the samples. Fix the error above, then run \"assay reviewer test %s\" again.\n", spec.Name, spec.Name)
 	}
 	return exit
 }

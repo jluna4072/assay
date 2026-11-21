@@ -11,7 +11,7 @@ import (
 	"sync"
 	"testing"
 
-	"harness/backend"
+	"assay/backend"
 )
 
 // chatFake answers chat requests by the reviewer name in the URL path
@@ -176,7 +176,7 @@ func TestAnthropicReviewer(t *testing.T) {
 		}
 	})
 	// Ambient credentials and base URL must never be used: only the key
-	// harness found is sent (the SDK sends it as a bearer token).
+	// assay found is sent (the SDK sends it as a bearer token).
 	t.Setenv("ANTHROPIC_API_KEY", "sk_ambient")
 	t.Setenv("ANTHROPIC_AUTH_TOKEN", "ambient_token")
 	t.Setenv("ANTHROPIC_BASE_URL", "http://127.0.0.1:1")

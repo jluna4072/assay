@@ -1,6 +1,6 @@
-# Harness
+# Assay
 
-A command-line harness for contract-driven checks of agent work. You publish a contract (acceptance rules and the dependencies between them) as a frozen version; harness checks a project against it, records every attempt and why each rule passed or failed, and keeps earlier attempts when you fix things and check again.
+assay is a command-line tool that checks agent work against contracts and proves each verdict with evidence. You publish a contract (acceptance rules and the dependencies between them) as a frozen version; assay checks a project against it, records every attempt and why each rule passed or failed, and keeps earlier attempts when you fix things and check again.
 
 ## Install
 
@@ -8,23 +8,23 @@ Install the Go version named in `app/go.mod`, then from the repository root:
 
 ```sh
 cd app
-go install ./cmd/harness   # puts harness in $(go env GOPATH)/bin
+go install ./cmd/assay   # puts assay in $(go env GOPATH)/bin
 ```
 
 ## Try it
 
 ```sh
 cd ~/my-project
-harness init                                   # creates .harness/ and harness/example.yaml
-harness contract validate harness/example.yaml
-harness contract publish harness/example.yaml  # freezes example@1
-harness check example                          # fails if there's no README.md
+assay init                                   # creates .assay/ and assay/example.yaml
+assay contract validate assay/example.yaml
+assay contract publish assay/example.yaml  # freezes example@1
+assay check example                          # fails if there's no README.md
 touch README.md
-harness recheck                                # passes; attempt 1's failure is kept
-harness show                                   # every attempt, with reasons
+assay recheck                                # passes; attempt 1's failure is kept
+assay show                                   # every attempt, with reasons
 ```
 
-Contracts are YAML files in `harness/`, committed with the project. Published versions, runs, and attempts live in `.harness/harness.db`, which `init` adds to `.gitignore`. Every command accepts `--json`, and exit codes report the verdict (0 passed, 1 failed, 2 couldn't run, 64 usage error), so `harness check` works as a gate in scripts and CI.
+Contracts are YAML files in `assay/`, committed with the project. Published versions, runs, and attempts live in `.assay/assay.db`, which `init` adds to `.gitignore`. Every command accepts `--json`, and exit codes report the verdict (0 passed, 1 failed, 2 couldn't run, 64 usage error), so `assay check` works as a gate in scripts and CI.
 
 See [the command line guide](docs/cli.md) for the contract format, every command, and the JSON output.
 
@@ -43,10 +43,10 @@ Tests need no network, credentials, or external tools; Keychain tests use a thro
 
 | Package | Role |
 |---|---|
-| `cmd/harness` | Entry point |
+| `cmd/assay` | Entry point |
 | `cli` | Commands, flags, output, exit codes |
 | `contractfile` | Strict YAML contract loading with line-numbered problems |
-| `project` | Finding a project's `.harness/` directory |
+| `project` | Finding a project's `.assay/` directory |
 | `backend` | Contracts, validation, publishing, runs, and checks |
 | `storage` | SQLite persistence |
 | `keychain` | Saving reviewer API keys in the macOS Keychain |
@@ -55,7 +55,7 @@ Backend details: [contract publication](docs/contracts.md) and [persistent runs]
 
 ## Scope
 
-Rules can check that a file exists, that an approved command succeeds, or that a reviewer you configure (TypeSafe's Jev, a Claude or OpenAI model, a model running locally through Ollama, or any program that speaks harness's review protocol) judges the evidence to meet a criterion, with dependencies between them. Each attempt can record file contents, git diffs, and command output as evidence, plus the exact review request and response; commands and reviewers run under the macOS sandbox. `harness work` has a worker (an agent or any program) do a task in a git worktree, checks the result, and sends back what failed until every rule passes or a limit is reached; the result is a branch you review and merge. MCP access and releases are future work.
+Rules can check that a file exists, that an approved command succeeds, or that a reviewer you configure (TypeSafe's Jev, a Claude or OpenAI model, a model running locally through Ollama, or any program that speaks assay's review protocol) judges the evidence to meet a criterion, with dependencies between them. Each attempt can record file contents, git diffs, and command output as evidence, plus the exact review request and response; commands and reviewers run under the macOS sandbox. `assay work` has a worker (an agent or any program) do a task in a git worktree, checks the result, and sends back what failed until every rule passes or a limit is reached; the result is a branch you review and merge. MCP access and releases are future work.
 
 ## Roadmap
 
@@ -63,9 +63,9 @@ Work lands in small pull requests, each reviewed before the next one starts.
 
 1. **Core command line.** Contract files, validation, publishing, runs, and attempts in SQLite; a text view of the dependency graph.
 2. **Evidence collection.** Collect file contents, diffs, and user-approved command results per attempt, and block a pass when required evidence is missing.
-3. **Model review.** Evaluate subjective rules with a reviewer the user chooses: any program speaking harness's review protocol, then built-in support for decision models such as TypeSafe's Jev, OpenAI-compatible and local servers, and Anthropic's API. Reviewer errors never produce a pass.
-4. **Worker and repair loop.** `harness work` runs a worker in a restricted workspace, returns failures as repair context, and retries within attempt and time limits.
-5. **MCP.** `harness mcp` lets outside agents draft contracts, request tasks, and check status. Publishing stays under user control.
-6. **Distribution.** Release binaries and a Homebrew tap, plus `harness doctor` for setup.
+3. **Model review.** Evaluate subjective rules with a reviewer the user chooses: any program speaking assay's review protocol, then built-in support for decision models such as TypeSafe's Jev, OpenAI-compatible and local servers, and Anthropic's API. Reviewer errors never produce a pass.
+4. **Worker and repair loop.** `assay work` runs a worker in a restricted workspace, returns failures as repair context, and retries within attempt and time limits.
+5. **MCP.** `assay mcp` lets outside agents draft contracts, request tasks, and check status. Publishing stays under user control.
+6. **Distribution.** Release binaries and a Homebrew tap, plus `assay doctor` for setup.
 
-The first end-to-end milestone: an outside agent requests a task through MCP, harness rejects a flawed attempt, retries it, and `harness show` presents the evidence for the final decision.
+The first end-to-end milestone: an outside agent requests a task through MCP, assay rejects a flawed attempt, retries it, and `assay show` presents the evidence for the final decision.

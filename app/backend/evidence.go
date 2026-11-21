@@ -29,7 +29,7 @@ const (
 	// CommandEvidence captures an approved command's output and exit status.
 	CommandEvidence EvidenceKind = "command"
 	// ReviewRequestEvidence and ReviewResponseEvidence record exactly what
-	// a reviewer was sent and what it answered. harness adds them to review
+	// a reviewer was sent and what it answered. assay adds them to review
 	// rules; contracts can't ask for them.
 	ReviewRequestEvidence  EvidenceKind = "review_request"
 	ReviewResponseEvidence EvidenceKind = "review_response"
@@ -44,7 +44,7 @@ const MaxEvidenceBytes = 1 << 20
 // repository that has no commits yet.
 const EmptyTree = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
-// EvidenceSpec is what a rule asks harness to record when it is checked.
+// EvidenceSpec is what a rule asks assay to record when it is checked.
 type EvidenceSpec struct {
 	Kind    EvidenceKind `json:"kind"`
 	Path    string       `json:"path,omitempty"`    // file
@@ -97,7 +97,7 @@ func (e *Evidence) store(content []byte, blobs map[string][]byte) {
 // path set and shared by every rule that asks for them.
 type collector struct {
 	projectDir string // where files are read and commands run: the project, or a work run's workspace
-	root       string // the project root, holding .harness/ (config, caches, scratch)
+	root       string // the project root, holding .assay/ (config, caches, scratch)
 	baseline   string
 	loadConfig func(projectDir string) (Config, error)
 	keys       KeySource // API keys for reviewers that need them
@@ -138,7 +138,7 @@ func (c *collector) config() (Config, error) {
 // (kind) in this attempt.
 func (c *collector) scratchDir(kind, name string) (string, error) {
 	if c.scratch == "" {
-		base := filepath.Join(c.root, ".harness", "tmp")
+		base := filepath.Join(c.root, ".assay", "tmp")
 		if err := os.MkdirAll(base, 0700); err != nil {
 			return "", err
 		}
@@ -225,7 +225,7 @@ func (c *collector) diff(paths []string) Evidence {
 		item.Error = "the project isn't a git repository, so there is no baseline to compare with"
 		return item
 	}
-	stateDir := filepath.Join(c.root, ".harness", "tmp")
+	stateDir := filepath.Join(c.root, ".assay", "tmp")
 	if err := os.MkdirAll(stateDir, 0700); err != nil {
 		item.Error = err.Error()
 		return item
@@ -258,13 +258,13 @@ func (c *collector) diff(paths []string) Evidence {
 			return item
 		}
 	}
-	// harness's own state never belongs in the diff, even if the project
+	// assay's own state never belongs in the diff, even if the project
 	// doesn't ignore it.
-	if _, err := git(c.projectDir, env, "rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ".harness"); err != nil {
+	if _, err := git(c.projectDir, env, "rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ".assay"); err != nil {
 		item.Error = err.Error()
 		return item
 	}
-	pathspec := append(append([]string{"--"}, selected...), ":(exclude).harness")
+	pathspec := append(append([]string{"--"}, selected...), ":(exclude).assay")
 	diffArgs := []string{"-c", "core.quotepath=false", "diff", "--cached", "--no-color", "--no-ext-diff", "--no-renames", "--binary"}
 	content, err := git(c.projectDir, env, append(append(diffArgs, c.baseline), pathspec...)...)
 	if err != nil {

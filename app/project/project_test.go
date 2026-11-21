@@ -23,21 +23,21 @@ func TestFindWalksUp(t *testing.T) {
 	if _, err := Find(t.TempDir()); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("find outside a project: %v", err)
 	}
-	// A file named .harness is not a project.
+	// A file named .assay is not a project.
 	other := t.TempDir()
 	os.WriteFile(filepath.Join(other, StateDir), nil, 0600)
 	if _, err := Open(other); !errors.Is(err, ErrNotFound) {
-		t.Fatalf("file named .harness: %v", err)
+		t.Fatalf("file named .assay: %v", err)
 	}
 }
 
 func TestEnsureIgnored(t *testing.T) {
 	for _, tc := range []struct{ before, after string }{
-		{"", "/.harness/\n"},
-		{"node_modules", "node_modules\n/.harness/\n"},
-		{"node_modules\n", "node_modules\n/.harness/\n"},
-		{".harness\n", ".harness\n"},
-		{"  /.harness/  \n", "  /.harness/  \n"},
+		{"", "/.assay/\n"},
+		{"node_modules", "node_modules\n/.assay/\n"},
+		{"node_modules\n", "node_modules\n/.assay/\n"},
+		{".assay\n", ".assay\n"},
+		{"  /.assay/  \n", "  /.assay/  \n"},
 	} {
 		dir := t.TempDir()
 		if tc.before != "" {

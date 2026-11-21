@@ -30,8 +30,8 @@ func newProject(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	mustRun(t, dir, "init")
-	os.WriteFile(filepath.Join(dir, "harness", "docs.yaml"), []byte(docsContract), 0644)
-	mustRun(t, dir, "contract", "publish", "harness/docs.yaml", "--yes")
+	os.WriteFile(filepath.Join(dir, "assay", "docs.yaml"), []byte(docsContract), 0644)
+	mustRun(t, dir, "contract", "publish", "assay/docs.yaml", "--yes")
 	return dir
 }
 
@@ -84,14 +84,14 @@ func TestFailCorrectPassKeepsHistory(t *testing.T) {
   ✗ readme   README.md does not exist
   ⊘ guide    blocked: dependency readme did not pass
 
-1 failed, 1 blocked · fix, then: harness recheck ` + short + "\n"
+1 failed, 1 blocked · fix, then: assay recheck ` + short + "\n"
 	if stdout != want {
 		t.Fatalf("check output:\n%s\nwant:\n%s", stdout, want)
 	}
 
 	// A newer version doesn't change what the run checks.
-	os.WriteFile(filepath.Join(dir, "harness", "docs.yaml"), []byte(strings.Replace(docsContract, "README.md", "README.txt", 1)), 0644)
-	mustRun(t, dir, "contract", "publish", "harness/docs.yaml", "--yes")
+	os.WriteFile(filepath.Join(dir, "assay", "docs.yaml"), []byte(strings.Replace(docsContract, "README.md", "README.txt", 1)), 0644)
+	mustRun(t, dir, "contract", "publish", "assay/docs.yaml", "--yes")
 
 	os.WriteFile(filepath.Join(dir, "README.md"), nil, 0644)
 	os.MkdirAll(filepath.Join(dir, "docs"), 0755)

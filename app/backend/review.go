@@ -14,7 +14,7 @@ import (
 	"unicode/utf8"
 )
 
-// ReviewProtocol is how harness talks to a reviewer.
+// ReviewProtocol is how assay talks to a reviewer.
 type ReviewProtocol string
 
 const (
@@ -154,7 +154,7 @@ func (c *collector) reviewerFor(spec ReviewerSpec, config Config) (reviewer, err
 	case AnthropicProtocol:
 		return &anthropicReviewer{spec: spec, keys: c.keys}, nil
 	}
-	return nil, fmt.Errorf("reviewer %q uses protocol %q, which this harness doesn't support", spec.Name, spec.Protocol)
+	return nil, fmt.Errorf("reviewer %q uses protocol %q, which this version of assay doesn't support", spec.Name, spec.Protocol)
 }
 
 // review asks the rule's reviewer to judge its criterion against items,
@@ -348,8 +348,8 @@ func (r *commandReviewer) call(request ReviewRequest) (reviewCall, error) {
 	stdout := &limitedBuffer{limit: MaxEvidenceBytes}
 	stderr := &limitedBuffer{limit: 64 << 10}
 	result, err := runProcess(process{
-		spec: spec, sandbox: r.sandbox, project: r.collector.projectDir, state: filepath.Join(r.collector.root, ".harness"), scratch: scratch,
-		cache: filepath.Join(r.collector.root, ".harness", "reviewer-cache", r.spec.Name),
+		spec: spec, sandbox: r.sandbox, project: r.collector.projectDir, state: filepath.Join(r.collector.root, ".assay"), scratch: scratch,
+		cache: filepath.Join(r.collector.root, ".assay", "reviewer-cache", r.spec.Name),
 		stdin: body, stdout: stdout, stderr: stderr,
 	})
 	call.duration, call.sandboxed = result.duration, result.sandboxed
@@ -400,7 +400,7 @@ func stderrTail(stderr []byte) string {
 	return ": " + strings.ToValidUTF8(text, "")
 }
 
-// ReviewSample is one fixed review harness runs to test a reviewer: a
+// ReviewSample is one fixed review assay runs to test a reviewer: a
 // criterion and a file that either meets it or doesn't.
 type ReviewSample struct {
 	Name      string `json:"name"`

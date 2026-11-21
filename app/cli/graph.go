@@ -6,8 +6,8 @@ import (
 	"io"
 	"strings"
 
-	"harness/backend"
-	"harness/contractfile"
+	"assay/backend"
+	"assay/contractfile"
 )
 
 var graphCommand = command{
@@ -31,7 +31,7 @@ Flags:
 ` + projectFlagHelp + `
 
 Paste mermaid output into Markdown that renders Mermaid (GitHub does), or
-render dot output with Graphviz: harness contract graph docs --format dot | dot -Tsvg
+render dot output with Graphviz: assay contract graph docs --format dot | dot -Tsvg
 `,
 	run: runGraph,
 }
@@ -96,17 +96,17 @@ func runGraph(e Env, cmd *command, args []string) int {
 		return code
 	}
 	if len(positional) != 1 {
-		fmt.Fprintln(e.Stderr, "harness contract graph: name exactly one contract (docs, docs@2) or contract file")
+		fmt.Fprintln(e.Stderr, "assay contract graph: name exactly one contract (docs, docs@2) or contract file")
 		return ExitUsage
 	}
 	switch *format {
 	case "text", "mermaid", "dot":
 	default:
-		fmt.Fprintf(e.Stderr, "harness contract graph: unknown format %q (use text, mermaid, or dot)\n", *format)
+		fmt.Fprintf(e.Stderr, "assay contract graph: unknown format %q (use text, mermaid, or dot)\n", *format)
 		return ExitUsage
 	}
 	if *asJSON && *format != "text" {
-		fmt.Fprintln(e.Stderr, "harness contract graph: --json and --format can't be combined")
+		fmt.Fprintln(e.Stderr, "assay contract graph: --json and --format can't be combined")
 		return ExitUsage
 	}
 	arg := positional[0]
@@ -116,12 +116,12 @@ func runGraph(e Env, cmd *command, args []string) int {
 
 	if isContractFile(arg) {
 		if *runID != "" {
-			fmt.Fprintln(e.Stderr, "harness contract graph: --run needs a published contract, not a file")
+			fmt.Fprintln(e.Stderr, "assay contract graph: --run needs a published contract, not a file")
 			return ExitUsage
 		}
 		result, err := contractfile.Check(resolve(e, arg))
 		if err != nil {
-			fmt.Fprintf(e.Stderr, "harness contract graph: %v\n", err)
+			fmt.Fprintf(e.Stderr, "assay contract graph: %v\n", err)
 			return ExitOperational
 		}
 		if !result.Valid() {
@@ -134,7 +134,7 @@ func runGraph(e Env, cmd *command, args []string) int {
 	} else {
 		id, version, err := parseRef(arg)
 		if err != nil {
-			fmt.Fprintf(e.Stderr, "harness contract graph: %v\n", err)
+			fmt.Fprintf(e.Stderr, "assay contract graph: %v\n", err)
 			return ExitUsage
 		}
 		s, code := openProject(e, cmd, *projectDir)
@@ -149,11 +149,11 @@ func runGraph(e Env, cmd *command, args []string) int {
 				return code
 			}
 			if run.ContractID != id {
-				fmt.Fprintf(e.Stderr, "harness contract graph: run %s checks %s@%d, not %s\n", shortID(run.ID), run.ContractID, run.Version, id)
+				fmt.Fprintf(e.Stderr, "assay contract graph: run %s checks %s@%d, not %s\n", shortID(run.ID), run.ContractID, run.Version, id)
 				return ExitUsage
 			}
 			if version != 0 && version != run.Version {
-				fmt.Fprintf(e.Stderr, "harness contract graph: run %s checks %s@%d, not %s@%d\n", shortID(run.ID), id, run.Version, id, version)
+				fmt.Fprintf(e.Stderr, "assay contract graph: run %s checks %s@%d, not %s@%d\n", shortID(run.ID), id, run.Version, id, version)
 				return ExitUsage
 			}
 			version = run.Version
@@ -167,7 +167,7 @@ func runGraph(e Env, cmd *command, args []string) int {
 		title = fmt.Sprintf("%s@%d (%s)", id, published.Version, published.Contract.Name)
 		if *runID != "" {
 			if len(run.Attempts) == 0 {
-				fmt.Fprintf(e.Stderr, "harness contract graph: run %s has no attempts yet\n", shortID(run.ID))
+				fmt.Fprintf(e.Stderr, "assay contract graph: run %s has no attempts yet\n", shortID(run.ID))
 				return ExitUsage
 			}
 			latest := run.Attempts[len(run.Attempts)-1]

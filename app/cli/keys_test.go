@@ -13,7 +13,7 @@ import (
 	"sync"
 	"testing"
 
-	"harness/keychain"
+	"assay/keychain"
 )
 
 func requireKeychain(t *testing.T) {
@@ -43,8 +43,8 @@ func fakeJev(t *testing.T) (*httptest.Server, func() string) {
 	return server, func() string { mu.Lock(); defer mu.Unlock(); return auth }
 }
 
-// runWithSecret runs harness as if a person typed answers at the terminal
-// (or piped them, when interactive is false), and counts how often harness
+// runWithSecret runs assay as if a person typed answers at the terminal
+// (or piped them, when interactive is false), and counts how often assay
 // asked.
 func runWithSecret(dir string, interactive bool, answer string, args ...string) (stdout, stderr string, code, asked int) {
 	var out, errOut bytes.Buffer
@@ -65,9 +65,9 @@ func jevProject(t *testing.T, endpoint string) string {
 	dir := t.TempDir()
 	mustRun(t, dir, "init")
 	config := "version: 1\nreviewers:\n  jev:\n    protocol: decisions\n    endpoint: " + endpoint + "\n"
-	os.WriteFile(filepath.Join(dir, ".harness", "config.yaml"), []byte(config), 0600)
-	os.WriteFile(filepath.Join(dir, "harness", "greet.yaml"), []byte(reviewContract), 0644)
-	mustRun(t, dir, "contract", "publish", "harness/greet.yaml", "--yes")
+	os.WriteFile(filepath.Join(dir, ".assay", "config.yaml"), []byte(config), 0600)
+	os.WriteFile(filepath.Join(dir, "assay", "greet.yaml"), []byte(reviewContract), 0644)
+	mustRun(t, dir, "contract", "publish", "assay/greet.yaml", "--yes")
 	return dir
 }
 
@@ -130,7 +130,7 @@ func TestReviewerLoginAndLogout(t *testing.T) {
 	}
 	os.Unsetenv("AI_GATEWAY_API_KEY")
 
-	// Piped input, as in: printf %s "$KEY" | harness reviewer login
+	// Piped input, as in: printf %s "$KEY" | assay reviewer login
 	if _, _, code, _ := runWithSecret(dir, false, "sk_test_piped\n", "reviewer", "login", "jev"); code != ExitOK {
 		t.Fatalf("piped login: exit %d", code)
 	}
@@ -148,7 +148,7 @@ func TestReviewerLoginAndLogout(t *testing.T) {
 		t.Fatalf("logout twice: %s", out)
 	}
 	// Command reviewers get keys through env:, not login.
-	os.WriteFile(filepath.Join(dir, ".harness", "config.yaml"), []byte(reviewerConfig), 0600)
+	os.WriteFile(filepath.Join(dir, ".assay", "config.yaml"), []byte(reviewerConfig), 0600)
 	if _, stderr, code, _ := runWithSecret(dir, true, "k", "reviewer", "login", "fake"); code != ExitUsage || !strings.Contains(stderr, "runs a program") {
 		t.Fatalf("command reviewer login: exit %d\n%s", code, stderr)
 	}
@@ -163,7 +163,7 @@ func TestMissingKeyIsAskedForOnce(t *testing.T) {
 
 	// Not at a terminal, or with --json: never ask.
 	out, _, code, asked := runWithSecret(dir, false, "sk_test_x", "check", "greet")
-	if asked != 0 || code != ExitOperational || !strings.Contains(out, `reviewer jev has no API key for decisions.invalid. Run "harness reviewer login jev" or set AI_GATEWAY_API_KEY`) {
+	if asked != 0 || code != ExitOperational || !strings.Contains(out, `reviewer jev has no API key for decisions.invalid. Run "assay reviewer login jev" or set AI_GATEWAY_API_KEY`) {
 		t.Fatalf("non-interactive: exit %d, asked %d\n%s", code, asked, out)
 	}
 	if _, _, _, asked := runWithSecret(dir, true, "sk_test_x", "recheck", "--json"); asked != 0 {
@@ -198,7 +198,7 @@ func TestMissingKeyIsAskedForOnce(t *testing.T) {
 func TestTypeSafeReviewerListing(t *testing.T) {
 	dir := t.TempDir()
 	mustRun(t, dir, "init")
-	os.WriteFile(filepath.Join(dir, ".harness", "config.yaml"), []byte("version: 1\nreviewers:\n  jev:\n    protocol: typesafe\n"), 0600)
+	os.WriteFile(filepath.Join(dir, ".assay", "config.yaml"), []byte("version: 1\nreviewers:\n  jev:\n    protocol: typesafe\n"), 0600)
 	t.Setenv("TYPESAFE_API_KEY", "apikey_test")
 	if list := mustRun(t, dir, "reviewer", "list"); !strings.Contains(list, "jev (default)  typesafe  jev-latest ≥ 0.90  $TYPESAFE_API_KEY") {
 		t.Fatalf("list:\n%s", list)
@@ -208,7 +208,7 @@ func TestTypeSafeReviewerListing(t *testing.T) {
 func TestChatReviewerListing(t *testing.T) {
 	dir := t.TempDir()
 	mustRun(t, dir, "init")
-	os.WriteFile(filepath.Join(dir, ".harness", "config.yaml"), []byte(`version: 1
+	os.WriteFile(filepath.Join(dir, ".assay", "config.yaml"), []byte(`version: 1
 reviewers:
   claude:
     protocol: anthropic

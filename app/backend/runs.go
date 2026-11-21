@@ -38,7 +38,7 @@ type Run struct {
 	Status     string    `json:"status"`
 	CreatedAt  time.Time `json:"createdAt"`
 	Attempts   []Attempt `json:"attempts"`
-	// Work is set for runs started by "harness work": the task, the worker,
+	// Work is set for runs started by "assay work": the task, the worker,
 	// the workspace the attempts were made in, and how the run ended.
 	Work *Work `json:"work,omitempty"`
 }

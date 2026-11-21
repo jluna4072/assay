@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"harness/backend"
+	"assay/backend"
 )
 
 func requireSandbox(t *testing.T) {
@@ -83,25 +83,25 @@ func TestSandboxLimitsCommands(t *testing.T) {
 	requireSandbox(t)
 	home, _ := os.UserHomeDir()
 	project := t.TempDir()
-	os.MkdirAll(filepath.Join(project, ".harness"), 0700)
-	os.WriteFile(filepath.Join(project, ".harness", "harness.db"), []byte("state"), 0600)
-	t.Setenv("HARNESS_TEST_SECRET", "s3cret")
-	t.Setenv("HARNESS_TEST_ALLOWED", "visible")
-	probe := filepath.Join(home, ".harness-sandbox-probe")
+	os.MkdirAll(filepath.Join(project, ".assay"), 0700)
+	os.WriteFile(filepath.Join(project, ".assay", "assay.db"), []byte("state"), 0600)
+	t.Setenv("ASSAY_TEST_SECRET", "s3cret")
+	t.Setenv("ASSAY_TEST_ALLOWED", "visible")
+	probe := filepath.Join(home, ".assay-sandbox-probe")
 	t.Cleanup(func() { os.Remove(probe) })
 
 	script := strings.Join([]string{
 		`echo x > "$TMPDIR/scratch" && echo scratch-write-ok`,
 		`echo x > "` + probe + `" 2>/dev/null || echo home-write-denied`,
 		`echo x > project.txt 2>/dev/null || echo project-write-denied`,
-		`cat .harness/harness.db >/dev/null 2>&1 || echo state-read-denied`,
+		`cat .assay/assay.db >/dev/null 2>&1 || echo state-read-denied`,
 		`/usr/bin/curl -sS -m 3 https://example.com >/dev/null 2>&1 || echo network-denied`,
-		`echo "secret=[$HARNESS_TEST_SECRET] allowed=[$HARNESS_TEST_ALLOWED]"`,
+		`echo "secret=[$ASSAY_TEST_SECRET] allowed=[$ASSAY_TEST_ALLOWED]"`,
 		`echo x > "$GOCACHE/entry" && echo cache-write-ok`,
 	}, "; ")
 	run := commandRun(t, configWith(true,
-		backend.CommandSpec{Name: "probe", Run: sh(script), Env: []string{"HARNESS_TEST_ALLOWED"}, Caches: []string{"GOCACHE"}},
-		backend.CommandSpec{Name: "writer", Run: sh(`echo x > project.txt && echo project-write-ok; echo x > .harness/evil 2>/dev/null || echo state-write-denied`), WritesProject: true},
+		backend.CommandSpec{Name: "probe", Run: sh(script), Env: []string{"ASSAY_TEST_ALLOWED"}, Caches: []string{"GOCACHE"}},
+		backend.CommandSpec{Name: "writer", Run: sh(`echo x > project.txt && echo project-write-ok; echo x > .assay/evil 2>/dev/null || echo state-write-denied`), WritesProject: true},
 	), project, commandRule("probe", "probe"), commandRule("writer", "writer"))
 
 	output := func(i int) string {
@@ -122,10 +122,10 @@ func TestSandboxLimitsCommands(t *testing.T) {
 	if _, err := os.Stat(probe); err == nil {
 		t.Error("sandboxed command wrote to the home directory")
 	}
-	if entries, _ := os.ReadDir(filepath.Join(project, ".harness", "tmp")); len(entries) != 0 {
+	if entries, _ := os.ReadDir(filepath.Join(project, ".assay", "tmp")); len(entries) != 0 {
 		t.Errorf("scratch left behind: %v", entries)
 	}
-	if _, err := os.Stat(filepath.Join(project, ".harness", "cache", "probe", "GOCACHE", "entry")); err != nil {
+	if _, err := os.Stat(filepath.Join(project, ".assay", "cache", "probe", "GOCACHE", "entry")); err != nil {
 		t.Error("cache directory didn't persist")
 	}
 }
@@ -149,7 +149,7 @@ func mustBlob(t *testing.T, run backend.Run, item backend.Evidence) []byte {
 func TestCommandTimeoutStopsChildren(t *testing.T) {
 	requireSandbox(t)
 	project := t.TempDir()
-	marker := filepath.Join(project, ".harness", "cache", "slow", "MARK", "survived")
+	marker := filepath.Join(project, ".assay", "cache", "slow", "MARK", "survived")
 	started := time.Now()
 	run := commandRun(t, configWith(true, backend.CommandSpec{
 		Name: "slow", Timeout: 1 * time.Second, Caches: []string{"MARK"},
@@ -176,7 +176,7 @@ func TestCommandRunsOncePerAttempt(t *testing.T) {
 	rule.Evidence = []backend.EvidenceSpec{{Kind: backend.CommandEvidence, Command: "count"}}
 	other := backend.Rule{ID: "b", Criterion: "b", Kind: backend.FileExists, Path: "x", Evidence: []backend.EvidenceSpec{{Kind: backend.CommandEvidence, Command: "count"}}}
 	run := commandRun(t, configWith(true, counter), project, rule, other)
-	data, _ := os.ReadFile(filepath.Join(project, ".harness", "cache", "count", "COUNT", "runs"))
+	data, _ := os.ReadFile(filepath.Join(project, ".assay", "cache", "count", "COUNT", "runs"))
 	if strings.Count(string(data), "run") != 1 {
 		t.Fatalf("command ran %d times", strings.Count(string(data), "run"))
 	}

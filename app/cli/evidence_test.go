@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"harness/backend"
+	"assay/backend"
 )
 
 const evidenceContract = `id: docs
@@ -42,13 +42,13 @@ func evidenceProject(t *testing.T) string {
 	}
 	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Demo\n"), 0644)
 	mustRun(t, dir, "init")
-	os.WriteFile(filepath.Join(dir, "harness", "docs.yaml"), []byte(evidenceContract), 0644)
+	os.WriteFile(filepath.Join(dir, "assay", "docs.yaml"), []byte(evidenceContract), 0644)
 	for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "-m", "start"}} {
 		if out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
 		}
 	}
-	mustRun(t, dir, "contract", "publish", "harness/docs.yaml", "--yes")
+	mustRun(t, dir, "contract", "publish", "assay/docs.yaml", "--yes")
 	return dir
 }
 
@@ -86,7 +86,7 @@ func TestEvidenceIsKeptPerAttempt(t *testing.T) {
 		"started ", " at HASH · passed on attempt 2",
 		"  ✗ guide    docs/guide.md does not exist\n      [1] file docs/guide.md · absent\n      [2] diff since HASH of docs · 0 files changed, 0 B · HASH\n",
 		"  ✓ readme\n      [1] file README.md · 7 B · HASH\n",
-		"Print an item with: harness evidence ",
+		"Print an item with: assay evidence ",
 	} {
 		if !strings.Contains(show, want) {
 			t.Errorf("show --evidence lacks %q:\n%s", want, show)
@@ -145,7 +145,7 @@ func TestCommandRulesThroughTheCLI(t *testing.T) {
 	}
 	dir := t.TempDir()
 	mustRun(t, dir, "init")
-	contract := filepath.Join(dir, "harness", "ci.yaml")
+	contract := filepath.Join(dir, "assay", "ci.yaml")
 	os.WriteFile(contract, []byte(`id: ci
 name: CI
 rules:
@@ -157,16 +157,16 @@ rules:
 
 	// Not approved yet: validate and publish both refuse.
 	stdout, _, code := runIn(dir, false, "contract", "validate", contract)
-	if code != ExitNegative || !strings.Contains(stdout, `command "check-flag" isn't approved in .harness/config.yaml`) {
+	if code != ExitNegative || !strings.Contains(stdout, `command "check-flag" isn't approved in .assay/config.yaml`) {
 		t.Fatalf("validate unapproved: exit %d\n%s", code, stdout)
 	}
 	if _, _, code := runIn(dir, false, "contract", "publish", contract, "--yes"); code != ExitNegative {
 		t.Fatalf("publish unapproved: exit %d", code)
 	}
 
-	config, _ := os.ReadFile(filepath.Join(dir, ".harness", "config.yaml"))
+	config, _ := os.ReadFile(filepath.Join(dir, ".assay", "config.yaml"))
 	config = []byte(strings.Replace(string(config), "commands: {}", "commands:\n  check-flag:\n    run: [/bin/sh, -c, 'cat flag.txt; grep -q yes flag.txt']", 1))
-	os.WriteFile(filepath.Join(dir, ".harness", "config.yaml"), config, 0600)
+	os.WriteFile(filepath.Join(dir, ".assay", "config.yaml"), config, 0600)
 	mustRun(t, dir, "contract", "validate", contract)
 	mustRun(t, dir, "contract", "publish", contract, "--yes")
 

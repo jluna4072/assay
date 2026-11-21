@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"harness/backend"
+	"assay/backend"
 )
 
 type staticKeys map[string]string
@@ -201,7 +201,7 @@ func TestDecisionsFailuresAreErrors(t *testing.T) {
 
 	want := map[string]string{
 		"refuses": "refuses's response isn't usable: the model declined to answer",
-		"rejects": `reviewer rejects: 127.0.0.1 rejected the API key (HTTP 401: Authentication failed). Check that it's a key for 127.0.0.1, then replace it with "harness reviewer login rejects"`,
+		"rejects": `reviewer rejects: 127.0.0.1 rejected the API key (HTTP 401: Authentication failed). Check that it's a key for 127.0.0.1, then replace it with "assay reviewer login rejects"`,
 		"broken":  "broken returned HTTP 500: provider unavailable",
 		"garbage": "expected a Decisions API response",
 		"twice":   "expected 1 answer, found 2",
@@ -308,12 +308,12 @@ func TestRejectedKeyNamesItsSource(t *testing.T) {
 
 	t.Setenv("AI_GATEWAY_API_KEY", "sk_from_env")
 	run := decisionsRun(t, config, backend.EnvKeys{}, project, reviewRule("env", "rejects"))
-	if reason := run.Attempts[0].Results[0].Reason; !strings.HasSuffix(reason, `fix or unset AI_GATEWAY_API_KEY, which overrides any key saved with "harness reviewer login"`) {
+	if reason := run.Attempts[0].Results[0].Reason; !strings.HasSuffix(reason, `fix or unset AI_GATEWAY_API_KEY, which overrides any key saved with "assay reviewer login"`) {
 		t.Fatalf("key from the variable: %q", reason)
 	}
 	t.Setenv("AI_GATEWAY_API_KEY", "")
 	run = decisionsRun(t, config, staticKeys{"rejects": "sk_saved"}, project, reviewRule("saved", "rejects"))
-	if reason := run.Attempts[0].Results[0].Reason; !strings.HasSuffix(reason, `replace it with "harness reviewer login rejects"`) {
+	if reason := run.Attempts[0].Results[0].Reason; !strings.HasSuffix(reason, `replace it with "assay reviewer login rejects"`) {
 		t.Fatalf("saved key: %q", reason)
 	}
 }

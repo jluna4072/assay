@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"harness/backend"
+	"assay/backend"
 )
 
 func TestConfigTemplateParses(t *testing.T) {
@@ -79,7 +79,7 @@ commands:
 		`command "escape": timeout must be a duration between 1s and 1h0m0s`,
 		`command "escape": network must be off, localhost, or on`,
 		`command "escape": writes must be scratch or project`,
-		`command "escape": PATH is set by harness`,
+		`command "escape": PATH is set by assay`,
 		`command "escape": "1BAD" isn't an environment variable name`,
 	} {
 		if !strings.Contains(joined, want) {
@@ -100,7 +100,7 @@ func TestLoadConfig(t *testing.T) {
 	}
 	os.MkdirAll(filepath.Join(root, StateDir), 0700)
 	os.WriteFile(filepath.Join(root, StateDir, ConfigFile), []byte("sandbox: sometimes\n"), 0600)
-	if _, err := LoadConfig(root); err == nil || !strings.Contains(err.Error(), ".harness/config.yaml:") {
+	if _, err := LoadConfig(root); err == nil || !strings.Contains(err.Error(), ".assay/config.yaml:") {
 		t.Fatalf("invalid file: %v", err)
 	}
 }
@@ -170,8 +170,8 @@ default_reviewer: missing
 	}
 	want = []string{
 		`default_reviewer "missing" isn't one of the reviewers configured here`,
-		`reviewer "future": protocol "gemini" isn't supported by this harness; it supports: command, typesafe, decisions, openai, anthropic`,
-		`reviewer "noproto": protocol is required; this harness supports: command, typesafe, decisions, openai, anthropic`,
+		`reviewer "future": protocol "gemini" isn't supported by this version of assay; it supports: command, typesafe, decisions, openai, anthropic`,
+		`reviewer "noproto": protocol is required; this version of assay supports: command, typesafe, decisions, openai, anthropic`,
 		`reviewer "norun": run needs a program and its arguments, like [go, test, ./...]`,
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {

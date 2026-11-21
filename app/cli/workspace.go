@@ -6,7 +6,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"harness/backend"
+	"assay/backend"
 )
 
 var workspaceListCommand = command{
@@ -14,7 +14,7 @@ var workspaceListCommand = command{
 	args:    "",
 	summary: "List the workspaces of work runs",
 	details: `
-Lists the runs made by "harness work", newest first, with each run's
+Lists the runs made by "assay work", newest first, with each run's
 outcome, branch, and whether its workspace is still on disk.
 
 Flags:
@@ -29,7 +29,7 @@ var workspaceCleanCommand = command{
 	args:    "[run]",
 	summary: "Remove the workspaces of finished work runs",
 	details: `
-Removes the workspaces (git worktrees under .harness/workspaces) of work
+Removes the workspaces (git worktrees under .assay/workspaces) of work
 runs that have finished, or of the one run named. Branches are kept: they
 hold every attempt's commit, and a cleaned run can still be resumed, which
 recreates its workspace from the branch.
@@ -77,7 +77,7 @@ func runWorkspaceList(e Env, cmd *command, args []string) int {
 		return code
 	}
 	if len(rest) > 0 {
-		fmt.Fprintf(e.Stderr, "harness %s: unexpected argument %q\n", cmd.name, rest[0])
+		fmt.Fprintf(e.Stderr, "assay %s: unexpected argument %q\n", cmd.name, rest[0])
 		return ExitUsage
 	}
 	s, code := openProject(e, cmd, *projectDir)
@@ -87,7 +87,7 @@ func runWorkspaceList(e Env, cmd *command, args []string) int {
 	defer s.Close()
 	list, err := s.service.Workspaces()
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)
+		fmt.Fprintf(e.Stderr, "assay %s: %v\n", cmd.name, err)
 		return ExitOperational
 	}
 	if *asJSON {
@@ -102,7 +102,7 @@ func runWorkspaceList(e Env, cmd *command, args []string) int {
 		return ExitOK
 	}
 	if len(list) == 0 {
-		fmt.Fprintln(e.Stdout, "no work runs yet. Start one with \"harness work <contract> --task ...\".")
+		fmt.Fprintln(e.Stdout, "no work runs yet. Start one with \"assay work <contract> --task ...\".")
 		return ExitOK
 	}
 	table := tabwriter.NewWriter(e.Stdout, 0, 0, 2, ' ', 0)
@@ -128,7 +128,7 @@ func runWorkspaceClean(e Env, cmd *command, args []string) int {
 		return code
 	}
 	if len(ids) > 1 {
-		fmt.Fprintf(e.Stderr, "harness %s: name at most one run\n", cmd.name)
+		fmt.Fprintf(e.Stderr, "assay %s: name at most one run\n", cmd.name)
 		return ExitUsage
 	}
 	s, code := openProject(e, cmd, *projectDir)
@@ -143,14 +143,14 @@ func runWorkspaceClean(e Env, cmd *command, args []string) int {
 			return code
 		}
 		if run.Work == nil {
-			fmt.Fprintf(e.Stderr, "harness %s: run %s wasn't made by \"harness work\", so it has no workspace\n", cmd.name, shortID(run.ID))
+			fmt.Fprintf(e.Stderr, "assay %s: run %s wasn't made by \"assay work\", so it has no workspace\n", cmd.name, shortID(run.ID))
 			return ExitUsage
 		}
 		runID = run.ID
 	}
 	results, err := s.service.CleanWorkspaces(runID, *force)
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)
+		fmt.Fprintf(e.Stderr, "assay %s: %v\n", cmd.name, err)
 		return ExitOperational
 	}
 	exit := ExitOK

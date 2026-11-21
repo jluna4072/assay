@@ -7,14 +7,14 @@ import (
 	"os"
 	"strings"
 
-	"harness/backend"
-	"harness/keychain"
-	"harness/project"
+	"assay/backend"
+	"assay/keychain"
+	"assay/project"
 )
 
-// keychainService names harness's items in the macOS Keychain. Each item's
+// keychainService names assay's items in the macOS Keychain. Each item's
 // account is the API host, so reviewers on one provider share a key.
-const keychainService = "harness"
+const keychainService = "assay"
 
 // cliKeys finds reviewer API keys: the reviewer's environment variable
 // first, then the Keychain. When a person is at the terminal, a missing key
@@ -65,7 +65,7 @@ func (k *cliKeys) Key(spec backend.ReviewerSpec) (string, error) {
 	case d.Local():
 		return "", nil
 	case !k.prompt:
-		return "", fmt.Errorf("reviewer %s has no API key for %s. Run \"harness reviewer login %s\" or set %s", spec.Name, host, spec.Name, d.KeyEnv)
+		return "", fmt.Errorf("reviewer %s has no API key for %s. Run \"assay reviewer login %s\" or set %s", spec.Name, host, spec.Name, d.KeyEnv)
 	}
 
 	fmt.Fprintf(k.e.Stderr, "Reviewer %s needs an API key for %s, and none is set up yet.\n", spec.Name, host)
@@ -77,7 +77,7 @@ func (k *cliKeys) Key(spec backend.ReviewerSpec) (string, error) {
 	if err := keychain.Set(keychainService, host, key); err != nil {
 		fmt.Fprintf(k.e.Stderr, "Couldn't save it to your Keychain (%v); using it for this run only.\n", err)
 	} else {
-		fmt.Fprintln(k.e.Stderr, "Saved to your Keychain; harness won't ask again on this Mac.")
+		fmt.Fprintln(k.e.Stderr, "Saved to your Keychain; assay won't ask again on this Mac.")
 	}
 	return key, nil
 }
@@ -101,7 +101,7 @@ var reviewerLoginCommand = command{
 	summary: "Save a reviewer's API key in the macOS Keychain",
 	details: `
 Asks for the API key of a reviewer (the default reviewer without a name)
-and saves it in your macOS Keychain, replacing any saved key. harness also
+and saves it in your macOS Keychain, replacing any saved key. assay also
 asks for a missing key the first time a review needs one, so this is only
 needed to set a key up ahead of time or replace it.
 
@@ -109,7 +109,7 @@ Keys are saved per API host, so reviewers that use the same endpoint share
 one. The reviewer's environment variable (TYPESAFE_API_KEY for a typesafe
 reviewer), when set, takes precedence over a saved key. With stdin not a
 terminal, the key is read from stdin:
-  printf %s "$KEY" | harness reviewer login
+  printf %s "$KEY" | assay reviewer login
 
 Flags:
 ` + projectFlagHelp + `
@@ -148,7 +148,7 @@ func keyedReviewer(e Env, cmd *command, args []string) (backend.ReviewerSpec, in
 		return backend.ReviewerSpec{}, code
 	}
 	if len(names) > 1 {
-		fmt.Fprintf(e.Stderr, "harness %s: name at most one reviewer\n", cmd.name)
+		fmt.Fprintf(e.Stderr, "assay %s: name at most one reviewer\n", cmd.name)
 		return backend.ReviewerSpec{}, ExitUsage
 	}
 	name := ""
@@ -162,16 +162,16 @@ func keyedReviewer(e Env, cmd *command, args []string) (backend.ReviewerSpec, in
 	defer s.Close()
 	config, err := project.LoadConfig(s.project.Root)
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)
+		fmt.Fprintf(e.Stderr, "assay %s: %v\n", cmd.name, err)
 		return backend.ReviewerSpec{}, ExitOperational
 	}
 	spec, err := config.Reviewer(name)
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)
+		fmt.Fprintf(e.Stderr, "assay %s: %v\n", cmd.name, err)
 		return backend.ReviewerSpec{}, ExitUsage
 	}
 	if !backend.UsesAPIKey(spec.Protocol) {
-		fmt.Fprintf(e.Stderr, "harness %s: reviewer %s runs a program, which gets any keys it needs from the variables listed under env: in its config\n", cmd.name, spec.Name)
+		fmt.Fprintf(e.Stderr, "assay %s: reviewer %s runs a program, which gets any keys it needs from the variables listed under env: in its config\n", cmd.name, spec.Name)
 		return backend.ReviewerSpec{}, ExitUsage
 	}
 	return spec, ExitOK
@@ -183,7 +183,7 @@ func runReviewerLogin(e Env, cmd *command, args []string) int {
 		return code
 	}
 	if e.ReadSecret == nil {
-		fmt.Fprintf(e.Stderr, "harness %s: can't read a key here\n", cmd.name)
+		fmt.Fprintf(e.Stderr, "assay %s: can't read a key here\n", cmd.name)
 		return ExitOperational
 	}
 	d := spec.Settings()
@@ -192,11 +192,11 @@ func runReviewerLogin(e Env, cmd *command, args []string) int {
 	}
 	key, err := (&cliKeys{e: e}).readKey()
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)
+		fmt.Fprintf(e.Stderr, "assay %s: %v\n", cmd.name, err)
 		return ExitOperational
 	}
 	if err := keychain.Set(keychainService, d.Host(), key); err != nil {
-		fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)
+		fmt.Fprintf(e.Stderr, "assay %s: %v\n", cmd.name, err)
 		return ExitOperational
 	}
 	fmt.Fprintf(e.Stdout, "Saved the API key for %s to your Keychain.\n", d.Host())
@@ -216,7 +216,7 @@ func runReviewerLogout(e Env, cmd *command, args []string) int {
 	case errors.Is(err, keychain.ErrNotFound):
 		fmt.Fprintf(e.Stdout, "No API key was saved for %s.\n", host)
 	case err != nil:
-		fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)
+		fmt.Fprintf(e.Stderr, "assay %s: %v\n", cmd.name, err)
 		return ExitOperational
 	default:
 		fmt.Fprintf(e.Stdout, "Removed the API key for %s from your Keychain.\n", host)

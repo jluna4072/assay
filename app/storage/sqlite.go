@@ -1,11 +1,11 @@
 package storage
 
 import (
+	"assay/backend"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"harness/backend"
 	_ "modernc.org/sqlite"
 	"net/url"
 	"os"
@@ -60,7 +60,7 @@ func Open(path string) (*SQLite, error) {
 }
 func (s *SQLite) Close() error { return s.db.Close() }
 func (s *SQLite) initialize() error {
-	// WAL lets "harness show --follow" read while "harness work" writes.
+	// WAL lets "assay show --follow" read while "assay work" writes.
 	if _, err := s.db.Exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;"); err != nil {
 		return err
 	}
@@ -69,7 +69,7 @@ func (s *SQLite) initialize() error {
 		return err
 	}
 	if version > SchemaVersion {
-		return fmt.Errorf("unsupported database schema version %d (this harness supports up to %d); upgrade harness", version, SchemaVersion)
+		return fmt.Errorf("unsupported database schema version %d (this version of assay supports up to %d); upgrade assay", version, SchemaVersion)
 	}
 	if version == SchemaVersion {
 		return nil
@@ -463,4 +463,48 @@ func (s *SQLite) ListEvents(runID string, after int) ([]backend.Event, error) {
 		events = append(events, event)
 	}
 	return events, rows.Err()
+}
+
+// MoveWorkspaces rewrites work runs' stored workspace paths from one state
+// directory to another, after the directory was moved. It returns how many
+// runs changed.
+func (s *SQLite) MoveWorkspaces(from, to string) (int, error) {
+	rows, err := s.db.Query("SELECT id, work FROM runs WHERE work != ''")
+	if err != nil {
+		return 0, err
+	}
+	type change struct{ id, work string }
+	var changes []change
+	for rows.Next() {
+		var id, data string
+		if err := rows.Scan(&id, &data); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		var work backend.Work
+		if err := json.Unmarshal([]byte(data), &work); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		prefix := from + string(filepath.Separator)
+		if len(work.Workspace) > len(prefix) && work.Workspace[:len(prefix)] == prefix {
+			work.Workspace = filepath.Join(to, work.Workspace[len(prefix):])
+			updated, err := json.Marshal(work)
+			if err != nil {
+				rows.Close()
+				return 0, err
+			}
+			changes = append(changes, change{id, string(updated)})
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+	for _, c := range changes {
+		if _, err := s.db.Exec("UPDATE runs SET work=? WHERE id=?", c.work, c.id); err != nil {
+			return 0, err
+		}
+	}
+	return len(changes), nil
 }

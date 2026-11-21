@@ -1,7 +1,7 @@
 // Package keychain stores secrets in the macOS Keychain through Apple's
 // /usr/bin/security tool. Using the tool rather than the Security framework
 // means the Keychain item is owned by security, so macOS doesn't ask again
-// whenever the harness binary changes. A secret is written to the tool's
+// whenever the assay binary changes. A secret is written to the tool's
 // stdin (in its interactive mode), never passed as an argument, so it can't
 // be seen in the process list.
 package keychain

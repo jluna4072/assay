@@ -1,6 +1,6 @@
 # Persistent runs
 
-`storage.Open(path)` opens a local SQLite database and creates or upgrades it to schema version 2. Drafts, immutable published versions, runs, attempts, rule results, and evidence content are stored separately. Version 2 added each run's git baseline and a content-addressed `blobs` table for evidence; a version 1 database is upgraded in place when opened, and a database from a newer harness is refused. A pure Go SQLite driver keeps the build free of C toolchains.
+`storage.Open(path)` opens a local SQLite database and creates or upgrades it to schema version 2. Drafts, immutable published versions, runs, attempts, rule results, and evidence content are stored separately. Version 2 added each run's git baseline and a content-addressed `blobs` table for evidence; a version 1 database is upgraded in place when opened, and a database from a newer assay is refused. A pure Go SQLite driver keeps the build free of C toolchains.
 
 Create a service with `backend.NewService(store)`. `StartRun(contractID, version, projectDir)` only accepts a published version and an existing project directory. `EvaluateAttempt(runID)` evaluates its frozen rules and appends another attempt. `GetRun` returns the full history; `ListRuns` returns summaries.
 

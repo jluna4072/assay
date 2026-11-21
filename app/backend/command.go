@@ -37,8 +37,8 @@ type CommandSpec struct {
 	Dir           string        // project-relative working directory; "" is the project root
 	Timeout       time.Duration // DefaultCommandTimeout when zero
 	Network       NetworkAccess // NetworkOff when empty
-	WritesProject bool          // may write anywhere in the project except .harness/
-	Env           []string      // variable names passed through from harness's environment
+	WritesProject bool          // may write anywhere in the project except .assay/
+	Env           []string      // variable names passed through from assay's environment
 	Caches        []string      // variable names pointed at persistent per-command cache directories
 }
 
@@ -51,7 +51,7 @@ type Config struct {
 	// empty and exactly one reviewer is configured, that one is the default.
 	DefaultReviewer string
 	Workers         map[string]WorkerSpec
-	DefaultWorker   string // the worker "harness work" uses without --worker
+	DefaultWorker   string // the worker "assay work" uses without --worker
 }
 
 // DefaultConfig is the configuration of a project with no config file.
@@ -67,19 +67,19 @@ func (c Config) Reviewer(name string) (ReviewerSpec, error) {
 		if name == "" {
 			switch len(c.Reviewers) {
 			case 0:
-				return ReviewerSpec{}, fmt.Errorf("no reviewers are configured in .harness/config.yaml")
+				return ReviewerSpec{}, fmt.Errorf("no reviewers are configured in .assay/config.yaml")
 			case 1:
 				for _, only := range c.Reviewers {
 					return only, nil
 				}
 			default:
-				return ReviewerSpec{}, fmt.Errorf("the rule doesn't name a reviewer and .harness/config.yaml sets no default_reviewer")
+				return ReviewerSpec{}, fmt.Errorf("the rule doesn't name a reviewer and .assay/config.yaml sets no default_reviewer")
 			}
 		}
 	}
 	spec, ok := c.Reviewers[name]
 	if !ok {
-		return ReviewerSpec{}, fmt.Errorf("reviewer %q isn't configured in .harness/config.yaml", name)
+		return ReviewerSpec{}, fmt.Errorf("reviewer %q isn't configured in .assay/config.yaml", name)
 	}
 	return spec, nil
 }
@@ -145,10 +145,10 @@ func sandboxProfile(spec CommandSpec, workspace bool) string {
   (subpath (string-append (param "HOME") "/.config/gh"))
   (subpath (string-append (param "HOME") "/Library/Keychains"))
   (literal (string-append (param "HOME") "/.netrc"))
-  (literal (string-append (param "STATE") "/harness.db"))
-  (literal (string-append (param "STATE") "/harness.db-journal"))
-  (literal (string-append (param "STATE") "/harness.db-wal"))
-  (literal (string-append (param "STATE") "/harness.db-shm")))
+  (literal (string-append (param "STATE") "/assay.db"))
+  (literal (string-append (param "STATE") "/assay.db-journal"))
+  (literal (string-append (param "STATE") "/assay.db-wal"))
+  (literal (string-append (param "STATE") "/assay.db-shm")))
 `)
 	return b.String()
 }
@@ -193,7 +193,7 @@ func (c *collector) runCommand(name string) Evidence {
 	}
 	spec, ok := config.Commands[name]
 	if !ok {
-		item.Error = fmt.Sprintf("command %q isn't approved in .harness/config.yaml", name)
+		item.Error = fmt.Sprintf("command %q isn't approved in .assay/config.yaml", name)
 		return item
 	}
 	item.Argv = spec.Run
@@ -204,8 +204,8 @@ func (c *collector) runCommand(name string) Evidence {
 	}
 	out := &output{hash: sha256.New()}
 	result, err := runProcess(process{
-		spec: spec, sandbox: config.Sandbox, project: c.projectDir, state: filepath.Join(c.root, ".harness"), scratch: scratch,
-		cache:  filepath.Join(c.root, ".harness", "cache", name),
+		spec: spec, sandbox: config.Sandbox, project: c.projectDir, state: filepath.Join(c.root, ".assay"), scratch: scratch,
+		cache:  filepath.Join(c.root, ".assay", "cache", name),
 		stdout: out, stderr: out,
 	})
 	if err != nil {
@@ -227,7 +227,7 @@ type process struct {
 	spec    CommandSpec
 	sandbox bool            // run under the OS sandbox
 	project string          // where it runs: the project root, or a work run's workspace
-	state   string          // harness's state directory, never writable; project/.harness when empty
+	state   string          // assay's state directory, never writable; project/.assay when empty
 	scratch string          // an empty directory for this run; TMPDIR
 	cache   string          // persistent cache root for spec.Caches
 	stdin   []byte          // nil for no input
@@ -252,7 +252,7 @@ func runProcess(p process) (processResult, error) {
 	spec := p.spec
 	if p.sandbox {
 		if err := SandboxAvailable(); err != nil {
-			return result, fmt.Errorf("can't run %s sandboxed: %v. Set \"sandbox: off\" in .harness/config.yaml to run it without the sandbox", spec.Name, err)
+			return result, fmt.Errorf("can't run %s sandboxed: %v. Set \"sandbox: off\" in .assay/config.yaml to run it without the sandbox", spec.Name, err)
 		}
 	}
 	dir := p.project
@@ -275,7 +275,7 @@ func runProcess(p process) (processResult, error) {
 
 	state := p.state
 	if state == "" {
-		state = filepath.Join(p.project, ".harness")
+		state = filepath.Join(p.project, ".assay")
 	}
 	env := []string{
 		"PATH=" + os.Getenv("PATH"),

@@ -16,7 +16,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"harness/backend"
+	"assay/backend"
 )
 
 // FormatVersion is the only contract file format this build understands.
@@ -174,7 +174,7 @@ func Parse(data []byte) Result {
 		}
 	}
 	if line, column := position(root, -1, "version"); file.Version != nil && *file.Version != FormatVersion && !decodeLines[line] {
-		add(Problem{Line: line, Column: column, Message: fmt.Sprintf("unsupported file version %d; this harness reads version %d", *file.Version, FormatVersion)})
+		add(Problem{Line: line, Column: column, Message: fmt.Sprintf("unsupported file version %d; this version of assay reads version %d", *file.Version, FormatVersion)})
 	}
 
 	result.Contract = backend.Contract{ID: file.ID, Name: file.Name, Rules: make([]backend.Rule, len(file.Rules))}
@@ -314,7 +314,7 @@ var (
 
 // YAMLProblem turns a YAML library error into a Problem with a line number
 // and wording that names YAML concepts rather than Go types. Other files
-// harness reads strictly (such as .harness/config.yaml) use it too.
+// assay reads strictly (such as .assay/config.yaml) use it too.
 func YAMLProblem(err error) Problem { return yamlProblem(err) }
 
 func yamlProblem(err error) Problem {

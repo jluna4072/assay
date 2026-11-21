@@ -17,10 +17,10 @@ import (
 )
 
 // Cancelled is the status of an attempt stopped before it finished, such
-// as by Ctrl-C during "harness work".
+// as by Ctrl-C during "assay work".
 const Cancelled ResultStatus = "cancelled"
 
-// WorkOutcome is how a work run ended. Only harness sets Accepted, and only
+// WorkOutcome is how a work run ended. Only assay sets Accepted, and only
 // when every rule passed.
 type WorkOutcome string
 
@@ -30,21 +30,21 @@ const (
 	WorkRejected  WorkOutcome = "rejected"  // the attempt limit was reached
 	WorkTimedOut  WorkOutcome = "timed_out" // the run's time limit was reached
 	WorkCancelled WorkOutcome = "cancelled" // stopped by the user
-	WorkError     WorkOutcome = "error"     // the worker or harness failed
+	WorkError     WorkOutcome = "error"     // the worker or assay failed
 )
 
-// Defaults for "harness work".
+// Defaults for "assay work".
 const (
 	DefaultMaxAttempts   = 3
 	DefaultWorkTimeout   = 30 * time.Minute
 	DefaultWorkerTimeout = 20 * time.Minute
 )
 
-// Work describes a run started by "harness work".
+// Work describes a run started by "assay work".
 type Work struct {
 	Task        string      `json:"task"`
 	Worker      string      `json:"worker"`
-	Workspace   string      `json:"workspace"` // a git worktree under .harness/workspaces
+	Workspace   string      `json:"workspace"` // a git worktree under .assay/workspaces
 	Branch      string      `json:"branch"`    // the worktree's branch, which holds each attempt's commit
 	MaxAttempts int         `json:"maxAttempts"`
 	Timeout     int64       `json:"timeoutMs"`
@@ -58,7 +58,7 @@ type Work struct {
 type WorkerSpec struct {
 	Name    string
 	Command CommandSpec // run, timeout (per attempt), network, env, caches
-	// Sandbox runs the worker under harness's sandbox: it can write only
+	// Sandbox runs the worker under assay's sandbox: it can write only
 	// to the workspace, a scratch directory, and its caches. Workers that
 	// sandbox themselves, such as Codex, turn it off, because macOS
 	// sandboxes can't be nested.
@@ -76,7 +76,7 @@ type WorkerRun struct {
 	Sandboxed bool     `json:"sandboxed"`
 	Prompt    Evidence `json:"prompt"`           // exactly what the worker was given
 	Output    Evidence `json:"output"`           // its combined stdout and stderr
-	Commit    string   `json:"commit,omitempty"` // the commit harness made of the workspace afterwards
+	Commit    string   `json:"commit,omitempty"` // the commit assay made of the workspace afterwards
 	Error     string   `json:"error,omitempty"`  // why it couldn't run
 }
 
@@ -88,19 +88,19 @@ func (c Config) Worker(name string) (WorkerSpec, error) {
 		if name == "" {
 			switch len(c.Workers) {
 			case 0:
-				return WorkerSpec{}, errors.New("no workers are configured in .harness/config.yaml")
+				return WorkerSpec{}, errors.New("no workers are configured in .assay/config.yaml")
 			case 1:
 				for _, only := range c.Workers {
 					return only, nil
 				}
 			default:
-				return WorkerSpec{}, errors.New("name a worker with --worker, or set default_worker in .harness/config.yaml")
+				return WorkerSpec{}, errors.New("name a worker with --worker, or set default_worker in .assay/config.yaml")
 			}
 		}
 	}
 	spec, ok := c.Workers[name]
 	if !ok {
-		return WorkerSpec{}, fmt.Errorf("worker %q isn't configured in .harness/config.yaml", name)
+		return WorkerSpec{}, fmt.Errorf("worker %q isn't configured in .assay/config.yaml", name)
 	}
 	return spec, nil
 }
@@ -182,13 +182,13 @@ func (s *Service) Work(ctx context.Context, options WorkOptions, events func(Eve
 	}
 	baseline := Baseline(root)
 	if baseline == "" || baseline == EmptyTree {
-		return Run{}, errors.New("harness work needs a git repository with at least one commit: it works on a copy of the last commit")
+		return Run{}, errors.New("assay work needs a git repository with at least one commit: it works on a copy of the last commit")
 	}
 
 	id := rand.Text()
 	name := strings.ToLower(id)
-	workspace := filepath.Join(root, ".harness", "workspaces", name)
-	branch := "harness/" + name
+	workspace := filepath.Join(root, ".assay", "workspaces", name)
+	branch := "assay/" + name
 	if err := os.MkdirAll(filepath.Dir(workspace), 0700); err != nil {
 		return Run{}, err
 	}
@@ -310,7 +310,7 @@ func (s *Service) ResumeWork(ctx context.Context, options ResumeOptions, events 
 		return Run{}, err
 	}
 	if run.Work == nil {
-		return Run{}, fmt.Errorf("run %s wasn't made by \"harness work\", so there's nothing to resume", strings.ToLower(run.ID))
+		return Run{}, fmt.Errorf("run %s wasn't made by \"assay work\", so there's nothing to resume", strings.ToLower(run.ID))
 	}
 	if run.Work.Outcome == WorkAccepted {
 		return Run{}, fmt.Errorf("run %s was accepted; there's nothing to resume", strings.ToLower(run.ID))
@@ -485,8 +485,8 @@ func (s *Service) runWorker(ctx context.Context, worker WorkerSpec, config Confi
 	lines := &lineWriter{onLine: onLine}
 	writer := io.MultiWriter(out, lines)
 	result, err := runProcess(process{
-		spec: spec, sandbox: worker.Sandbox && config.Sandbox, project: run.Dir(), state: filepath.Join(run.ProjectDir, ".harness"),
-		scratch: scratch, cache: filepath.Join(run.ProjectDir, ".harness", "worker-cache", worker.Name),
+		spec: spec, sandbox: worker.Sandbox && config.Sandbox, project: run.Dir(), state: filepath.Join(run.ProjectDir, ".assay"),
+		scratch: scratch, cache: filepath.Join(run.ProjectDir, ".assay", "worker-cache", worker.Name),
 		stdin: []byte(prompt), stdout: writer, stderr: writer, ctx: ctx,
 	})
 	lines.flush()
@@ -503,11 +503,11 @@ func (s *Service) runWorker(ctx context.Context, worker WorkerSpec, config Confi
 }
 
 // commitWorkspace commits every change in the workspace, returning the new
-// commit, or "" when nothing changed. harness's own state is never
+// commit, or "" when nothing changed. assay's own state is never
 // committed. Hooks and signing are skipped: the commit records the
 // worker's result, and must not run project code or ask for anything.
 func commitWorkspace(workspace, runID string, number int) (string, error) {
-	if _, err := git(workspace, nil, "add", "--all", "--", ".", ":(exclude).harness"); err != nil {
+	if _, err := git(workspace, nil, "add", "--all", "--", ".", ":(exclude).assay"); err != nil {
 		return "", err
 	}
 	if _, err := git(workspace, nil, "diff", "--cached", "--quiet"); err == nil {
@@ -515,9 +515,9 @@ func commitWorkspace(workspace, runID string, number int) (string, error) {
 	}
 	args := []string{"-c", "commit.gpgsign=false"}
 	if name, _ := git(workspace, nil, "config", "user.email"); strings.TrimSpace(string(name)) == "" {
-		args = append(args, "-c", "user.name=harness", "-c", "user.email=harness@localhost")
+		args = append(args, "-c", "user.name=assay", "-c", "user.email=assay@localhost")
 	}
-	message := fmt.Sprintf("harness: attempt %d of run %s", number, strings.ToLower(runID))
+	message := fmt.Sprintf("assay: attempt %d of run %s", number, strings.ToLower(runID))
 	if _, err := git(workspace, nil, append(args, "commit", "--quiet", "--no-verify", "-m", message)...); err != nil {
 		return "", err
 	}
@@ -570,7 +570,7 @@ const maxRepairOutput = 4 << 10
 func workPrompt(contract Contract, run Run, task string, number int, previous *Attempt) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are working in a git workspace: a copy of the project at commit %s. Make the changes the task asks for in this directory.\n", shortHash(run.Baseline))
-	b.WriteString("When you exit, harness checks the workspace against the rules below. Only those checks decide whether the work is accepted; what you report about your own work is ignored.\n\n")
+	b.WriteString("When you exit, assay checks the workspace against the rules below. Only those checks decide whether the work is accepted; what you report about your own work is ignored.\n\n")
 	fmt.Fprintf(&b, "Task:\n%s\n\n", strings.TrimSpace(task))
 	fmt.Fprintf(&b, "Rules (contract %s@%d):\n", contract.ID, run.Version)
 	for _, rule := range contract.Rules {
@@ -583,7 +583,7 @@ func workPrompt(contract Contract, run Run, task string, number int, previous *A
 		fmt.Fprintf(&b, "\nThis is attempt %d of %d.\n", number, run.Work.MaxAttempts)
 		return b.String()
 	}
-	fmt.Fprintf(&b, "\nThis is attempt %d of %d. Your previous attempt's changes are still in the workspace. harness checked them, and these rules didn't pass:\n", number, run.Work.MaxAttempts)
+	fmt.Fprintf(&b, "\nThis is attempt %d of %d. Your previous attempt's changes are still in the workspace. assay checked them, and these rules didn't pass:\n", number, run.Work.MaxAttempts)
 	var passed []string
 	for _, result := range previous.Results {
 		if result.Status == Passed {
@@ -613,7 +613,7 @@ func workPrompt(contract Contract, run Run, task string, number int, previous *A
 	return b.String()
 }
 
-// describeCheck says how harness checks a rule, for the worker.
+// describeCheck says how assay checks a rule, for the worker.
 func describeCheck(rule Rule) string {
 	switch rule.Kind {
 	case FileExists:

@@ -5,9 +5,9 @@ import (
 	"flag"
 	"fmt"
 
-	"harness/backend"
-	"harness/contractfile"
-	"harness/project"
+	"assay/backend"
+	"assay/contractfile"
+	"assay/project"
 )
 
 var validateCommand = command{
@@ -18,8 +18,8 @@ var validateCommand = command{
 Reads each YAML contract file and reports every problem that would stop it
 from being published: unknown or duplicate keys, wrong types, missing fields,
 unsupported checks, paths outside the project, unknown or duplicate
-dependencies, and dependency cycles. Inside a harness project, it also checks
-that every command the contract runs is approved in .harness/config.yaml.
+dependencies, and dependency cycles. Inside an assay project, it also checks
+that every command the contract runs is approved in .assay/config.yaml.
 Nothing is saved.
 
 Flags:
@@ -56,7 +56,7 @@ func runValidate(e Env, cmd *command, args []string) int {
 		return code
 	}
 	if len(files) == 0 {
-		fmt.Fprintln(e.Stderr, "harness contract validate: name at least one contract file")
+		fmt.Fprintln(e.Stderr, "assay contract validate: name at least one contract file")
 		return ExitUsage
 	}
 
@@ -113,7 +113,7 @@ func runValidate(e Env, cmd *command, args []string) int {
 	for _, report := range reports {
 		switch {
 		case report.Error != "":
-			fmt.Fprintf(e.Stderr, "harness: %s\n", report.Error)
+			fmt.Fprintf(e.Stderr, "assay: %s\n", report.Error)
 		case report.Valid:
 			fmt.Fprintf(e.Stdout, "✓ %s: %s, %s\n", report.Path, report.Contract.ID, plural(report.Contract.Rules, "rule"))
 		default:

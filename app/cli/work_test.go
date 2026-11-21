@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"assay/storage"
 )
 
 // workCLIProject is a committed git repository with a contract that needs
@@ -24,11 +26,11 @@ func workCLIProject(t *testing.T, worker string) string {
 	git("config", "user.email", "t@example.com")
 	git("config", "user.name", "T")
 	mustRun(t, dir, "init")
-	os.WriteFile(filepath.Join(dir, "harness", "readme.yaml"), []byte("version: 1\nid: readme\nname: README\nrules:\n  - {id: readme, criterion: Project has a README, check: file_exists, path: README.md}\n"), 0644)
+	os.WriteFile(filepath.Join(dir, "assay", "readme.yaml"), []byte("version: 1\nid: readme\nname: README\nrules:\n  - {id: readme, criterion: Project has a README, check: file_exists, path: README.md}\n"), 0644)
 	git("add", "-A")
 	git("commit", "-q", "-m", "start")
-	os.WriteFile(filepath.Join(dir, ".harness", "config.yaml"), []byte("version: 1\nsandbox: off\nworkers:\n  writer:\n    run: [sh, -c, '"+worker+"']\n"), 0600)
-	mustRun(t, dir, "contract", "publish", "harness/readme.yaml", "--yes")
+	os.WriteFile(filepath.Join(dir, ".assay", "config.yaml"), []byte("version: 1\nsandbox: off\nworkers:\n  writer:\n    run: [sh, -c, '"+worker+"']\n"), 0600)
+	mustRun(t, dir, "contract", "publish", "assay/readme.yaml", "--yes")
 	return dir
 }
 
@@ -43,7 +45,7 @@ func TestWorkCommand(t *testing.T) {
 			t.Errorf("progress lacks %q:\n%s", want, stderr)
 		}
 	}
-	if !strings.HasPrefix(stdout, "ACCEPTED · readme@1 · run ") || !strings.Contains(stdout, "every rule passed on attempt 1") || !strings.Contains(stdout, "harness never merges") {
+	if !strings.HasPrefix(stdout, "ACCEPTED · readme@1 · run ") || !strings.Contains(stdout, "every rule passed on attempt 1") || !strings.Contains(stdout, "assay never merges") {
 		t.Fatalf("result:\n%s", stdout)
 	}
 
@@ -91,7 +93,7 @@ func TestWorkCommandRejectsAndUsage(t *testing.T) {
 func TestWorkResumeAndWorkspaces(t *testing.T) {
 	dir := workCLIProject(t, `cat >/dev/null; echo nothing to do`)
 	stdout, _, code := runIn(dir, false, "work", "readme", "--task", "x", "--max-attempts", "1", "--quiet")
-	if code != ExitNegative || !strings.Contains(stdout, "harness work --resume ") || !strings.Contains(stdout, "--max-attempts 3") {
+	if code != ExitNegative || !strings.Contains(stdout, "assay work --resume ") || !strings.Contains(stdout, "--max-attempts 3") {
 		t.Fatalf("rejected: exit %d\n%s", code, stdout)
 	}
 	if _, stderr, code := runIn(dir, false, "work", "--resume", "zz"); code != ExitUsage || !strings.Contains(stderr, "no run matches") {
@@ -108,7 +110,7 @@ func TestWorkResumeAndWorkspaces(t *testing.T) {
 	}
 
 	// The worker now writes the README; resuming with one more attempt passes.
-	config := filepath.Join(dir, ".harness", "config.yaml")
+	config := filepath.Join(dir, ".assay", "config.yaml")
 	os.WriteFile(config, []byte("version: 1\nsandbox: off\nworkers:\n  writer:\n    run: [sh, -c, 'cat >/dev/null; echo hi > README.md']\n"), 0600)
 	stdout, stderr, code := runIn(dir, false, "work", "--resume", firstRun(t, dir), "--max-attempts", "2")
 	if code != ExitOK || !strings.Contains(stderr, "resuming after attempt 1 · readme@1") || !strings.Contains(stderr, "attempt 2 of 2") || !strings.HasPrefix(stdout, "ACCEPTED") {
@@ -116,10 +118,10 @@ func TestWorkResumeAndWorkspaces(t *testing.T) {
 	}
 
 	list := mustRun(t, dir, "workspace", "list")
-	if !strings.Contains(list, "accepted") || !strings.Contains(list, ".harness/workspaces/") {
+	if !strings.Contains(list, "accepted") || !strings.Contains(list, ".assay/workspaces/") {
 		t.Fatalf("list:\n%s", list)
 	}
-	if out := mustRun(t, dir, "workspace", "clean"); !strings.HasPrefix(out, "removed  .harness/workspaces/") || !strings.Contains(out, "kept") {
+	if out := mustRun(t, dir, "workspace", "clean"); !strings.HasPrefix(out, "removed  .assay/workspaces/") || !strings.Contains(out, "kept") {
 		t.Fatalf("clean:\n%s", out)
 	}
 	if list := mustRun(t, dir, "workspace", "list"); !strings.Contains(list, "(removed)") {
@@ -197,5 +199,57 @@ func TestShowFollow(t *testing.T) {
 	runIn(dir, false, "check", "readme") // fails: the README is only on the work branch
 	if _, stderr, code := runIn(dir, false, "show", "--follow"); code != ExitUsage || !strings.Contains(stderr, "nothing to follow") {
 		t.Fatalf("check run: exit %d\n%s", code, stderr)
+	}
+}
+
+// A project made before the rename moves over with assay init, keeping its
+// runs and work-run workspaces.
+func TestInitMigratesLegacyProject(t *testing.T) {
+	dir := workCLIProject(t, `cat >/dev/null; echo hi > README.md`)
+	mustRun(t, dir, "work", "readme", "--task", "x", "--quiet")
+	// Put the project back in its pre-rename layout.
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(os.Rename(filepath.Join(dir, ".assay", "assay.db"), filepath.Join(dir, ".assay", "harness.db")))
+	os.Remove(filepath.Join(dir, ".assay", "assay.db-wal"))
+	os.Remove(filepath.Join(dir, ".assay", "assay.db-shm"))
+	must(os.Rename(filepath.Join(dir, ".assay"), filepath.Join(dir, ".harness")))
+	must(os.Rename(filepath.Join(dir, "assay"), filepath.Join(dir, "harness")))
+	must(os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("node_modules\n/.harness/\n"), 0644))
+	legacy, err := storage.Open(filepath.Join(dir, ".harness", "harness.db"))
+	must(err)
+	_, err = legacy.MoveWorkspaces(filepath.Join(dir, ".assay"), filepath.Join(dir, ".harness"))
+	must(err)
+	legacy.Close()
+
+	if _, stderr, code := runIn(dir, false, "runs"); code == ExitOK || !strings.Contains(stderr, `run "assay init" here to move it over`) {
+		t.Fatalf("legacy project: exit %d\n%s", code, stderr)
+	}
+	out := mustRun(t, dir, "init")
+	for _, want := range []string{"moved    .harness/ → .assay/", "moved    harness/ → assay/", "moved    .gitignore: /.harness/ → /.assay/", "moved    1 work runs' workspace paths updated"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("init lacks %q:\n%s", want, out)
+		}
+	}
+	if gitignore, _ := os.ReadFile(filepath.Join(dir, ".gitignore")); string(gitignore) != "node_modules\n/.assay/\n" {
+		t.Fatalf(".gitignore: %q", gitignore)
+	}
+	var shown struct {
+		Run runJSON `json:"run"`
+	}
+	json.Unmarshal([]byte(mustRun(t, dir, "show", "--json")), &shown)
+	workspace := shown.Run.Work.Workspace
+	if !strings.Contains(workspace, filepath.Join(".assay", "workspaces")) {
+		t.Fatalf("workspace path: %s", workspace)
+	}
+	if out, err := exec.Command("git", "-C", workspace, "status", "--short").CombinedOutput(); err != nil {
+		t.Fatalf("the moved workspace isn't a working git worktree: %v\n%s", err, out)
+	}
+	if out := mustRun(t, dir, "workspace", "clean"); !strings.Contains(out, "removed  .assay/workspaces/") {
+		t.Fatalf("clean after migration:\n%s", out)
 	}
 }

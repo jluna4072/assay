@@ -14,8 +14,8 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"harness/backend"
-	"harness/contractfile"
+	"assay/backend"
+	"assay/contractfile"
 )
 
 // ConfigFile holds a project's local settings, inside StateDir. Only the
@@ -28,9 +28,9 @@ const MaxCommandTimeout = time.Hour
 
 func (p Project) ConfigPath() string { return filepath.Join(p.Root, StateDir, ConfigFile) }
 
-// ConfigTemplate is written by harness init.
-const ConfigTemplate = `# harness local settings for this project. Only you edit this file; it
-# lives in .harness/, which isn't committed.
+// ConfigTemplate is written by assay init.
+const ConfigTemplate = `# assay local settings for this project. Only you edit this file; it
+# lives in .assay/, which isn't committed.
 version: 1
 
 # Approved commands run under the macOS sandbox: no network unless allowed
@@ -51,17 +51,17 @@ commands: {}
 #    network: off             # off, localhost, or on
 #    writes: scratch          # scratch (a temporary directory) or project
 #    env: [GOFLAGS]           # variables passed through from your environment
-#    caches: [GOCACHE]        # variables pointed at .harness/cache/go-test/<NAME>
+#    caches: [GOCACHE]        # variables pointed at .assay/cache/go-test/<NAME>
 
 # Reviewers judge "check: review" rules: a model reads the rule's criterion
 # and evidence and answers pass, fail, or insufficient_evidence. Contracts
 # name a reviewer (reviewer: careful) or use the default, so each person
-# chooses the model. Test one with "harness reviewer test <name>".
+# chooses the model. Test one with "assay reviewer test <name>".
 reviewers: {}
 #  jev:                       # TypeSafe's Jev, with a TypeSafe console key
 #    protocol: typesafe       # https://api.typesafe.ai/v1, model jev-latest
 #    threshold: 0.9           # probability needed to pass (default)
-#    # The key comes from TYPESAFE_API_KEY, or the Keychain: harness asks
+#    # The key comes from TYPESAFE_API_KEY, or the Keychain: assay asks
 #    # for it once, the first time it's needed.
 #
 #  jev-gateway:               # Jev through Vercel's AI Gateway, with a Vercel key
@@ -89,9 +89,9 @@ reviewers: {}
 #    env: [MY_API_KEY]        # variables passed through from your environment
 # default_reviewer: careful   # needed only with more than one reviewer
 
-# Workers do tasks for "harness work": a program that gets the task and the
+# Workers do tasks for "assay work": a program that gets the task and the
 # rules on stdin and changes files in a workspace (a git worktree of the
-# last commit). harness checks the result and sends back what failed.
+# last commit). assay checks the result and sends back what failed.
 workers: {}
 #  agent:
 #    run: [my-agent, --auto]  # program and arguments; no shell
@@ -155,7 +155,7 @@ type commandFile struct {
 
 var variableName = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// reservedVariables are set by harness for every command.
+// reservedVariables are set by assay for every command.
 var reservedVariables = map[string]bool{"PATH": true, "HOME": true, "LANG": true, "TMPDIR": true, "XDG_CACHE_HOME": true}
 
 // LoadConfig reads the config of the project rooted at root. A missing
@@ -203,7 +203,7 @@ func ParseConfig(data []byte) (backend.Config, []contractfile.Problem) {
 		return config, problems
 	}
 	if file.Version != nil && *file.Version != 1 {
-		add("unsupported config version %d; this harness reads version 1", *file.Version)
+		add("unsupported config version %d; this version of assay reads version 1", *file.Version)
 	}
 	if file.Sandbox != nil {
 		switch strings.ToLower(*file.Sandbox) {
@@ -290,9 +290,9 @@ func ParseConfig(data []byte) (backend.Config, []contractfile.Problem) {
 			}
 			spec.API = decisions
 		case "":
-			add("%sprotocol is required; this harness supports: command, typesafe, decisions, openai, anthropic", prefix)
+			add("%sprotocol is required; this version of assay supports: command, typesafe, decisions, openai, anthropic", prefix)
 		default:
-			add("%sprotocol %q isn't supported by this harness; it supports: command, typesafe, decisions, openai, anthropic", prefix, reviewer.Protocol)
+			add("%sprotocol %q isn't supported by this version of assay; it supports: command, typesafe, decisions, openai, anthropic", prefix, reviewer.Protocol)
 		}
 		config.Reviewers[name] = spec
 	}
@@ -358,7 +358,7 @@ func checkProgram(name, prefix string, run []string, timeout, network string, en
 		if !variableName.MatchString(variable) {
 			add("%s%q isn't an environment variable name", prefix, variable)
 		} else if reservedVariables[variable] {
-			add("%s%s is set by harness and can't be configured", prefix, variable)
+			add("%s%s is set by assay and can't be configured", prefix, variable)
 		}
 	}
 	return spec

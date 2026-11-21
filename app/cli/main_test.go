@@ -7,14 +7,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"harness/keychain"
+	"assay/keychain"
 )
 
 // TestMain points the Keychain at a throwaway keychain file, so no test
 // reads or writes the user's own keys.
 func TestMain(m *testing.M) {
 	os.Unsetenv("AI_GATEWAY_API_KEY")
-	dir, err := os.MkdirTemp("", "harness-cli-test-")
+	dir, err := os.MkdirTemp("", "assay-cli-test-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)

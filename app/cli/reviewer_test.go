@@ -41,8 +41,8 @@ func reviewerProject(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	mustRun(t, dir, "init")
-	os.WriteFile(filepath.Join(dir, ".harness", "config.yaml"), []byte(reviewerConfig), 0600)
-	os.WriteFile(filepath.Join(dir, "harness", "greet.yaml"), []byte(reviewContract), 0644)
+	os.WriteFile(filepath.Join(dir, ".assay", "config.yaml"), []byte(reviewerConfig), 0600)
+	os.WriteFile(filepath.Join(dir, "assay", "greet.yaml"), []byte(reviewContract), 0644)
 	return dir
 }
 
@@ -106,7 +106,7 @@ func TestReviewerTest(t *testing.T) {
 
 func TestReviewRuleCheck(t *testing.T) {
 	dir := reviewerProject(t)
-	mustRun(t, dir, "contract", "publish", "harness/greet.yaml", "--yes")
+	mustRun(t, dir, "contract", "publish", "assay/greet.yaml", "--yes")
 
 	os.WriteFile(filepath.Join(dir, "README.md"), []byte("Goodbye\n"), 0644)
 	out, _, code := runIn(dir, false, "check", "greet")
@@ -151,12 +151,12 @@ func TestReviewRuleCheck(t *testing.T) {
 func TestUnconfiguredReviewerIsAProblem(t *testing.T) {
 	dir := reviewerProject(t)
 	contract := strings.Replace(reviewContract, "check: review", "check: review\n    reviewer: careful", 1)
-	os.WriteFile(filepath.Join(dir, "harness", "greet.yaml"), []byte(contract), 0644)
-	want := `harness/greet.yaml:8:5: rule "says-hello": reviewer "careful" isn't configured in .harness/config.yaml`
-	if out, _, code := runIn(dir, false, "contract", "validate", "harness/greet.yaml"); code != ExitNegative || !strings.Contains(out, want) {
+	os.WriteFile(filepath.Join(dir, "assay", "greet.yaml"), []byte(contract), 0644)
+	want := `assay/greet.yaml:8:5: rule "says-hello": reviewer "careful" isn't configured in .assay/config.yaml`
+	if out, _, code := runIn(dir, false, "contract", "validate", "assay/greet.yaml"); code != ExitNegative || !strings.Contains(out, want) {
 		t.Fatalf("validate: exit %d\n%s", code, out)
 	}
-	if out, stderr, code := runIn(dir, false, "contract", "publish", "harness/greet.yaml", "--yes"); code != ExitNegative || !strings.Contains(out+stderr, want) {
+	if out, stderr, code := runIn(dir, false, "contract", "publish", "assay/greet.yaml", "--yes"); code != ExitNegative || !strings.Contains(out+stderr, want) {
 		t.Fatalf("publish: exit %d\n%s%s", code, out, stderr)
 	}
 }

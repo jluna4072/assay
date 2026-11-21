@@ -30,28 +30,28 @@ func useTestKeychain(t *testing.T) {
 
 func TestSetGetDelete(t *testing.T) {
 	useTestKeychain(t)
-	if _, err := Get("harness", "example.com"); !errors.Is(err, ErrNotFound) {
+	if _, err := Get("assay", "example.com"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("get before set: %v", err)
 	}
-	if err := Set("harness", "example.com", "sk_test_123"); err != nil {
+	if err := Set("assay", "example.com", "sk_test_123"); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := Get("harness", "example.com"); err != nil || got != "sk_test_123" {
+	if got, err := Get("assay", "example.com"); err != nil || got != "sk_test_123" {
 		t.Fatalf("get: %q %v", got, err)
 	}
-	if err := Set("harness", "example.com", "sk_test_456"); err != nil {
+	if err := Set("assay", "example.com", "sk_test_456"); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := Get("harness", "example.com"); got != "sk_test_456" {
+	if got, _ := Get("assay", "example.com"); got != "sk_test_456" {
 		t.Fatalf("replace: %q", got)
 	}
-	if _, err := Get("harness", "other.com"); !errors.Is(err, ErrNotFound) {
+	if _, err := Get("assay", "other.com"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("other account: %v", err)
 	}
-	if err := Delete("harness", "example.com"); err != nil {
+	if err := Delete("assay", "example.com"); err != nil {
 		t.Fatal(err)
 	}
-	if err := Delete("harness", "example.com"); !errors.Is(err, ErrNotFound) {
+	if err := Delete("assay", "example.com"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("delete twice: %v", err)
 	}
 }
@@ -59,11 +59,11 @@ func TestSetGetDelete(t *testing.T) {
 func TestSetRejectsUnsafeValues(t *testing.T) {
 	useTestKeychain(t)
 	for _, secret := range []string{"", "two words", "quote\"d", "line\nbreak", `back\slash`} {
-		if err := Set("harness", "example.com", secret); err == nil {
+		if err := Set("assay", "example.com", secret); err == nil {
 			t.Errorf("stored %q", secret)
 		}
 	}
-	if _, err := Get("harness", "example.com"); !errors.Is(err, ErrNotFound) {
+	if _, err := Get("assay", "example.com"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("something was stored: %v", err)
 	}
 }
