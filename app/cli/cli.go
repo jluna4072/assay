@@ -4,6 +4,7 @@ package cli
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -39,6 +40,8 @@ type Env struct {
 	// ReadSecret reads one line without echoing it when a person is at the
 	// terminal, or from stdin otherwise (for piping a key in).
 	ReadSecret func(prompt string) (string, error)
+	// Context, when set, cancels long-running commands such as work.
+	Context context.Context
 }
 
 // DefaultEnv returns the environment of the running process.
@@ -80,6 +83,7 @@ var commands = []command{
 	showCommand,
 	graphCommand,
 	checkCommand,
+	workCommand,
 	recheckCommand,
 	runsCommand,
 	showRunCommand,

@@ -50,11 +50,13 @@ type Config struct {
 	// DefaultReviewer reviews rules that don't name a reviewer. When it's
 	// empty and exactly one reviewer is configured, that one is the default.
 	DefaultReviewer string
+	Workers         map[string]WorkerSpec
+	DefaultWorker   string // the worker "harness work" uses without --worker
 }
 
 // DefaultConfig is the configuration of a project with no config file.
 func DefaultConfig() Config {
-	return Config{Sandbox: true, Commands: map[string]CommandSpec{}, Reviewers: map[string]ReviewerSpec{}}
+	return Config{Sandbox: true, Commands: map[string]CommandSpec{}, Reviewers: map[string]ReviewerSpec{}, Workers: map[string]WorkerSpec{}}
 }
 
 // Reviewer returns the reviewer a rule names, or the default reviewer when
@@ -111,7 +113,9 @@ func probeSandbox() error {
 // sandboxProfile builds the Seatbelt profile for a command. Paths are
 // passed as parameters, never spliced into the profile text. Later rules
 // override earlier ones.
-func sandboxProfile(spec CommandSpec) string {
+// When workspace is set, PROJECT is a work run's workspace inside STATE:
+// writes are allowed there even though the rest of STATE stays read-only.
+func sandboxProfile(spec CommandSpec, workspace bool) string {
 	var b strings.Builder
 	b.WriteString("(version 1)\n(allow default)\n")
 	switch spec.Network {
@@ -124,6 +128,9 @@ func sandboxProfile(spec CommandSpec) string {
 	b.WriteString("(deny file-write*)\n")
 	if spec.WritesProject {
 		b.WriteString("(allow file-write* (subpath (param \"PROJECT\")))\n(deny file-write* (subpath (param \"STATE\")))\n")
+		if workspace {
+			b.WriteString("(allow file-write* (subpath (param \"PROJECT\")))\n")
+		}
 	}
 	b.WriteString(`(allow file-write*
   (subpath (param "SCRATCH"))
@@ -197,8 +204,8 @@ func (c *collector) runCommand(name string) Evidence {
 	}
 	out := &output{hash: sha256.New()}
 	result, err := runProcess(process{
-		spec: spec, sandbox: config.Sandbox, project: c.projectDir, scratch: scratch,
-		cache:  filepath.Join(c.projectDir, ".harness", "cache", name),
+		spec: spec, sandbox: config.Sandbox, project: c.projectDir, state: filepath.Join(c.root, ".harness"), scratch: scratch,
+		cache:  filepath.Join(c.root, ".harness", "cache", name),
 		stdout: out, stderr: out,
 	})
 	if err != nil {
@@ -218,18 +225,21 @@ func (c *collector) runCommand(name string) Evidence {
 // process is one run of an approved program: a command or a reviewer.
 type process struct {
 	spec    CommandSpec
-	sandbox bool   // run under the OS sandbox
-	project string // the project root
-	scratch string // an empty directory for this run; TMPDIR
-	cache   string // persistent cache root for spec.Caches
-	stdin   []byte // nil for no input
+	sandbox bool            // run under the OS sandbox
+	project string          // where it runs: the project root, or a work run's workspace
+	state   string          // harness's state directory, never writable; project/.harness when empty
+	scratch string          // an empty directory for this run; TMPDIR
+	cache   string          // persistent cache root for spec.Caches
+	stdin   []byte          // nil for no input
+	ctx     context.Context // cancels the run early; nil for none
 	stdout  io.Writer
 	stderr  io.Writer
 }
 
 type processResult struct {
-	exitCode  int // -1 when timed out
+	exitCode  int // -1 when timed out or cancelled
 	timedOut  bool
+	cancelled bool  // p.ctx was cancelled
 	duration  int64 // milliseconds
 	sandboxed bool
 }
@@ -263,7 +273,10 @@ func runProcess(p process) (processResult, error) {
 		return result, fmt.Errorf("can't find %q: %v", spec.Run[0], err)
 	}
 
-	state := filepath.Join(p.project, ".harness")
+	state := p.state
+	if state == "" {
+		state = filepath.Join(p.project, ".harness")
+	}
 	env := []string{
 		"PATH=" + os.Getenv("PATH"),
 		"HOME=" + os.Getenv("HOME"),
@@ -294,7 +307,9 @@ func runProcess(p process) (processResult, error) {
 		for _, param := range [][2]string{{"PROJECT", p.project}, {"STATE", state}, {"SCRATCH", p.scratch}, {"CACHE", p.cache}, {"HOME", os.Getenv("HOME")}} {
 			params = append(params, "-D", param[0]+"="+resolvePath(param[1]))
 		}
-		argv = append(append([]string{sandboxExec, "-p", sandboxProfile(spec)}, params...), argv...)
+		project, stateDir := resolvePath(p.project), resolvePath(state)
+		workspace := strings.HasPrefix(project, stateDir+string(filepath.Separator))
+		argv = append(append([]string{sandboxExec, "-p", sandboxProfile(spec, workspace)}, params...), argv...)
 		result.sandboxed = true
 	}
 
@@ -302,7 +317,11 @@ func runProcess(p process) (processResult, error) {
 	if timeout <= 0 {
 		timeout = DefaultCommandTimeout
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	parent := p.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
@@ -319,6 +338,9 @@ func runProcess(p process) (processResult, error) {
 
 	var exitErr *exec.ExitError
 	switch {
+	case parent.Err() != nil:
+		result.cancelled = true
+		result.exitCode = -1
 	case errors.Is(ctx.Err(), context.DeadlineExceeded):
 		result.timedOut = true
 		result.exitCode = -1

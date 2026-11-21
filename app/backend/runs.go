@@ -23,6 +23,8 @@ type Attempt struct {
 	CompletedAt time.Time    `json:"completedAt"`
 	Status      ResultStatus `json:"status"`
 	Results     []RuleResult `json:"results"`
+	// Worker records the worker that produced this attempt, for work runs.
+	Worker *WorkerRun `json:"worker,omitempty"`
 	// Blobs holds evidence content keyed by Evidence.Blob, for the
 	// repository to store with the attempt. Reads leave it empty.
 	Blobs map[string][]byte `json:"-"`
@@ -36,7 +38,20 @@ type Run struct {
 	Status     string    `json:"status"`
 	CreatedAt  time.Time `json:"createdAt"`
 	Attempts   []Attempt `json:"attempts"`
+	// Work is set for runs started by "harness work": the task, the worker,
+	// the workspace the attempts were made in, and how the run ended.
+	Work *Work `json:"work,omitempty"`
 }
+
+// Dir is where a run's checks look: the work run's workspace, or the
+// project itself.
+func (r Run) Dir() string {
+	if r.Work != nil && r.Work.Workspace != "" {
+		return r.Work.Workspace
+	}
+	return r.ProjectDir
+}
+
 type RunRepository interface {
 	Repository
 	CreateRun(Run) error
@@ -45,6 +60,8 @@ type RunRepository interface {
 	// AppendAttempt atomically numbers an attempt, saves results and evidence
 	// blobs, and updates the run.
 	AppendAttempt(string, Attempt) (Run, error)
+	// UpdateWork replaces a work run's Work record, such as its outcome.
+	UpdateWork(string, Work) error
 	GetBlob(string) ([]byte, error)
 }
 
@@ -110,8 +127,6 @@ func (s *Service) ListRuns() ([]Run, error) {
 	return store.ListRuns()
 }
 func (s *Service) EvaluateAttempt(runID string) (Run, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	store, err := s.runRepository()
 	if err != nil {
 		return Run{}, err
@@ -120,15 +135,42 @@ func (s *Service) EvaluateAttempt(runID string) (Run, error) {
 	if err != nil {
 		return Run{}, err
 	}
-	published, err := store.GetVersion(run.ContractID, run.Version)
+	attempt, err := s.evaluate(run)
 	if err != nil {
 		return Run{}, err
 	}
-	if err := ValidateContract(published.Contract); err != nil {
+	return s.appendAttempt(run.ID, attempt)
+}
+
+// appendAttempt records an attempt.
+func (s *Service) appendAttempt(runID string, attempt Attempt) (Run, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	store, err := s.runRepository()
+	if err != nil {
 		return Run{}, err
 	}
+	return store.AppendAttempt(runID, attempt)
+}
+
+// evaluate checks every rule of a run's contract against the run's
+// directory, without recording the result.
+func (s *Service) evaluate(run Run) (Attempt, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	store, err := s.runRepository()
+	if err != nil {
+		return Attempt{}, err
+	}
+	published, err := store.GetVersion(run.ContractID, run.Version)
+	if err != nil {
+		return Attempt{}, err
+	}
+	if err := ValidateContract(published.Contract); err != nil {
+		return Attempt{}, err
+	}
 	attempt := Attempt{StartedAt: time.Now().UTC(), Status: Passed}
-	evidence := newCollector(run.ProjectDir, run.Baseline, s.LoadConfig)
+	evidence := newCollector(run.Dir(), run.ProjectDir, run.Baseline, s.LoadConfig)
 	evidence.keys = s.Keys
 	defer evidence.cleanup()
 	rules := make(map[string]Rule)
@@ -171,7 +213,7 @@ func (s *Service) EvaluateAttempt(runID string) (Run, error) {
 			result.Passed = result.Status == Passed
 		default:
 			var err error
-			result, err = CheckFileExists(run.ProjectDir, rule)
+			result, err = CheckFileExists(run.Dir(), rule)
 			if err != nil {
 				result.Status = OperationalError
 				result.Reason = err.Error()
@@ -204,5 +246,5 @@ func (s *Service) EvaluateAttempt(runID string) (Run, error) {
 	}
 	attempt.CompletedAt = time.Now().UTC()
 	attempt.Blobs = evidence.blobs
-	return store.AppendAttempt(run.ID, attempt)
+	return attempt, nil
 }

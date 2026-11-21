@@ -16,8 +16,9 @@ import (
 type SQLite struct{ db *sql.DB }
 
 // SchemaVersion is the database layout this build creates and reads.
-// Version 2 added run baselines and the evidence blob store.
-const SchemaVersion = 2
+// Version 2 added run baselines and the evidence blob store; version 3,
+// work runs and the worker that made each attempt.
+const SchemaVersion = 3
 
 var _ backend.RunRepository = (*SQLite)(nil)
 
@@ -84,11 +85,12 @@ CREATE TABLE IF NOT EXISTS versions (
 CREATE TABLE IF NOT EXISTS runs (
  id TEXT PRIMARY KEY, contract_id TEXT NOT NULL, version INTEGER NOT NULL,
  project_dir TEXT NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL,
- baseline TEXT NOT NULL DEFAULT '',
+ baseline TEXT NOT NULL DEFAULT '', work TEXT NOT NULL DEFAULT '',
  FOREIGN KEY(contract_id, version) REFERENCES versions(contract_id, version));
 CREATE TABLE IF NOT EXISTS attempts (
  run_id TEXT NOT NULL REFERENCES runs(id), number INTEGER NOT NULL,
  started_at TEXT NOT NULL, completed_at TEXT NOT NULL, status TEXT NOT NULL,
+ worker TEXT NOT NULL DEFAULT '',
  PRIMARY KEY(run_id, number));
 CREATE TABLE IF NOT EXISTS rule_results (
  run_id TEXT NOT NULL, attempt_number INTEGER NOT NULL, position INTEGER NOT NULL,
@@ -106,11 +108,21 @@ BEGIN SELECT RAISE(ABORT, 'evidence is immutable'); END;
 	if err != nil {
 		return err
 	}
-	if version == 1 {
-		// Version 1 runs had no baseline; CREATE TABLE IF NOT EXISTS above
-		// left the existing table as it was.
+	// CREATE TABLE IF NOT EXISTS above leaves existing tables as they were,
+	// so add the columns later versions introduced.
+	if version >= 1 && version < 2 {
 		if _, err := tx.Exec("ALTER TABLE runs ADD COLUMN baseline TEXT NOT NULL DEFAULT ''"); err != nil {
 			return fmt.Errorf("upgrade schema to version 2: %w", err)
+		}
+	}
+	if version >= 1 && version < 3 {
+		for _, statement := range []string{
+			"ALTER TABLE runs ADD COLUMN work TEXT NOT NULL DEFAULT ''",
+			"ALTER TABLE attempts ADD COLUMN worker TEXT NOT NULL DEFAULT ''",
+		} {
+			if _, err := tx.Exec(statement); err != nil {
+				return fmt.Errorf("upgrade schema to version 3: %w", err)
+			}
 		}
 	}
 	if _, err := tx.Exec(fmt.Sprintf("PRAGMA user_version = %d", SchemaVersion)); err != nil {
@@ -213,25 +225,69 @@ func (s *SQLite) ListVersions(id string) ([]backend.PublishedContract, error) {
 	}
 	return result, rows.Err()
 }
+
+// optionalJSON encodes v, or "" for nil.
+func optionalJSON[T any](v *T) (string, error) {
+	if v == nil {
+		return "", nil
+	}
+	data, err := json.Marshal(v)
+	return string(data), err
+}
+
+// decodeOptional decodes data into a new T, or returns nil for "".
+func decodeOptional[T any](data string) (*T, error) {
+	if data == "" {
+		return nil, nil
+	}
+	v := new(T)
+	return v, json.Unmarshal([]byte(data), v)
+}
+
 func (s *SQLite) CreateRun(r backend.Run) error {
-	_, err := s.db.Exec("INSERT INTO runs(id,contract_id,version,project_dir,baseline,status,created_at) VALUES(?,?,?,?,?,?,?)", r.ID, r.ContractID, r.Version, r.ProjectDir, r.Baseline, r.Status, r.CreatedAt.Format(time.RFC3339Nano))
+	work, err := optionalJSON(r.Work)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.Exec("INSERT INTO runs(id,contract_id,version,project_dir,baseline,status,created_at,work) VALUES(?,?,?,?,?,?,?,?)", r.ID, r.ContractID, r.Version, r.ProjectDir, r.Baseline, r.Status, r.CreatedAt.Format(time.RFC3339Nano), work)
 	return err
 }
+
+// UpdateWork replaces a work run's Work record.
+func (s *SQLite) UpdateWork(id string, work backend.Work) error {
+	data, err := json.Marshal(work)
+	if err != nil {
+		return err
+	}
+	result, err := s.db.Exec("UPDATE runs SET work=? WHERE id=?", string(data), id)
+	if err != nil {
+		return err
+	}
+	if n, _ := result.RowsAffected(); n == 0 {
+		return backend.ErrNotFound
+	}
+	return nil
+}
+
 func scanRun(row interface{ Scan(...any) error }) (r backend.Run, err error) {
-	var created string
-	err = row.Scan(&r.ID, &r.ContractID, &r.Version, &r.ProjectDir, &r.Baseline, &r.Status, &created)
+	var created, work string
+	err = row.Scan(&r.ID, &r.ContractID, &r.Version, &r.ProjectDir, &r.Baseline, &r.Status, &created, &work)
 	if err != nil {
 		return r, notFound(err)
 	}
 	r.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
+	if err != nil {
+		return r, err
+	}
+	r.Work, err = decodeOptional[backend.Work](work)
 	r.Attempts = []backend.Attempt{}
 	return
 }
 func (s *SQLite) GetRun(id string) (backend.Run, error) {
 	run := backend.Run{Attempts: []backend.Attempt{}}
 	// Read status and history in one statement so concurrent appends cannot mix snapshots.
-	rows, err := s.db.Query(`SELECT r.id,r.contract_id,r.version,r.project_dir,r.baseline,r.status,r.created_at,
-a.number,a.started_at,a.completed_at,a.status,rr.payload
+	rows, err := s.db.Query(`SELECT r.id,r.contract_id,r.version,r.project_dir,r.baseline,r.status,r.created_at,r.work,
+a.number,a.started_at,a.completed_at,a.status,a.worker,rr.payload
 FROM runs r LEFT JOIN attempts a ON r.id=a.run_id
 LEFT JOIN rule_results rr ON a.run_id=rr.run_id AND a.number=rr.attempt_number
 WHERE r.id=? ORDER BY a.number,rr.position`, id)
@@ -243,13 +299,16 @@ WHERE r.id=? ORDER BY a.number,rr.position`, id)
 	for rows.Next() {
 		found = true
 		var number sql.NullInt64
-		var created string
-		var started, completed, status, payload sql.NullString
-		if err := rows.Scan(&run.ID, &run.ContractID, &run.Version, &run.ProjectDir, &run.Baseline, &run.Status, &created, &number, &started, &completed, &status, &payload); err != nil {
+		var created, work string
+		var started, completed, status, worker, payload sql.NullString
+		if err := rows.Scan(&run.ID, &run.ContractID, &run.Version, &run.ProjectDir, &run.Baseline, &run.Status, &created, &work, &number, &started, &completed, &status, &worker, &payload); err != nil {
 			return run, err
 		}
 		run.CreatedAt, err = time.Parse(time.RFC3339Nano, created)
 		if err != nil {
+			return run, err
+		}
+		if run.Work, err = decodeOptional[backend.Work](work); err != nil {
 			return run, err
 		}
 		if !number.Valid {
@@ -264,7 +323,11 @@ WHERE r.id=? ORDER BY a.number,rr.position`, id)
 			if err != nil {
 				return run, err
 			}
-			run.Attempts = append(run.Attempts, backend.Attempt{Number: int(number.Int64), StartedAt: start, CompletedAt: end, Status: backend.ResultStatus(status.String), Results: []backend.RuleResult{}})
+			workerRun, err := decodeOptional[backend.WorkerRun](worker.String)
+			if err != nil {
+				return run, err
+			}
+			run.Attempts = append(run.Attempts, backend.Attempt{Number: int(number.Int64), StartedAt: start, CompletedAt: end, Status: backend.ResultStatus(status.String), Results: []backend.RuleResult{}, Worker: workerRun})
 		}
 		if payload.Valid {
 			var result backend.RuleResult
@@ -284,7 +347,7 @@ WHERE r.id=? ORDER BY a.number,rr.position`, id)
 	return run, nil
 }
 func (s *SQLite) ListRuns() ([]backend.Run, error) {
-	rows, err := s.db.Query("SELECT id,contract_id,version,project_dir,baseline,status,created_at FROM runs ORDER BY created_at DESC,id")
+	rows, err := s.db.Query("SELECT id,contract_id,version,project_dir,baseline,status,created_at,work FROM runs ORDER BY created_at DESC,id")
 	if err != nil {
 		return nil, err
 	}
@@ -313,7 +376,11 @@ func (s *SQLite) AppendAttempt(id string, attempt backend.Attempt) (backend.Run,
 	if err := tx.QueryRow("SELECT COALESCE(MAX(number),0)+1 FROM attempts WHERE run_id=?", id).Scan(&number); err != nil {
 		return backend.Run{}, err
 	}
-	if _, err := tx.Exec("INSERT INTO attempts(run_id,number,started_at,completed_at,status) VALUES(?,?,?,?,?)", id, number, attempt.StartedAt.Format(time.RFC3339Nano), attempt.CompletedAt.Format(time.RFC3339Nano), attempt.Status); err != nil {
+	worker, err := optionalJSON(attempt.Worker)
+	if err != nil {
+		return backend.Run{}, err
+	}
+	if _, err := tx.Exec("INSERT INTO attempts(run_id,number,started_at,completed_at,status,worker) VALUES(?,?,?,?,?,?)", id, number, attempt.StartedAt.Format(time.RFC3339Nano), attempt.CompletedAt.Format(time.RFC3339Nano), attempt.Status, worker); err != nil {
 		return backend.Run{}, err
 	}
 	for hash, data := range attempt.Blobs {

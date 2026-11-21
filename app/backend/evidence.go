@@ -96,7 +96,8 @@ func (e *Evidence) store(content []byte, blobs map[string][]byte) {
 // collector gathers evidence for one attempt. Diffs are computed once per
 // path set and shared by every rule that asks for them.
 type collector struct {
-	projectDir string
+	projectDir string // where files are read and commands run: the project, or a work run's workspace
+	root       string // the project root, holding .harness/ (config, caches, scratch)
 	baseline   string
 	loadConfig func(projectDir string) (Config, error)
 	keys       KeySource // API keys for reviewers that need them
@@ -110,9 +111,12 @@ type collector struct {
 	configErr    error
 }
 
-func newCollector(projectDir, baseline string, loadConfig func(string) (Config, error)) *collector {
+func newCollector(projectDir, root, baseline string, loadConfig func(string) (Config, error)) *collector {
+	if root == "" {
+		root = projectDir
+	}
 	return &collector{
-		projectDir: projectDir, baseline: baseline, loadConfig: loadConfig,
+		projectDir: projectDir, root: root, baseline: baseline, loadConfig: loadConfig,
 		blobs: map[string][]byte{}, diffs: map[string]Evidence{}, commands: map[string]Evidence{},
 	}
 }
@@ -125,7 +129,7 @@ func (c *collector) config() (Config, error) {
 			c.loadedConfig = DefaultConfig()
 			return
 		}
-		c.loadedConfig, c.configErr = c.loadConfig(c.projectDir)
+		c.loadedConfig, c.configErr = c.loadConfig(c.root)
 	})
 	return c.loadedConfig, c.configErr
 }
@@ -134,7 +138,7 @@ func (c *collector) config() (Config, error) {
 // (kind) in this attempt.
 func (c *collector) scratchDir(kind, name string) (string, error) {
 	if c.scratch == "" {
-		base := filepath.Join(c.projectDir, ".harness", "tmp")
+		base := filepath.Join(c.root, ".harness", "tmp")
 		if err := os.MkdirAll(base, 0700); err != nil {
 			return "", err
 		}
@@ -221,7 +225,7 @@ func (c *collector) diff(paths []string) Evidence {
 		item.Error = "the project isn't a git repository, so there is no baseline to compare with"
 		return item
 	}
-	stateDir := filepath.Join(c.projectDir, ".harness", "tmp")
+	stateDir := filepath.Join(c.root, ".harness", "tmp")
 	if err := os.MkdirAll(stateDir, 0700); err != nil {
 		item.Error = err.Error()
 		return item

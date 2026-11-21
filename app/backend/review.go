@@ -348,8 +348,8 @@ func (r *commandReviewer) call(request ReviewRequest) (reviewCall, error) {
 	stdout := &limitedBuffer{limit: MaxEvidenceBytes}
 	stderr := &limitedBuffer{limit: 64 << 10}
 	result, err := runProcess(process{
-		spec: spec, sandbox: r.sandbox, project: r.collector.projectDir, scratch: scratch,
-		cache: filepath.Join(r.collector.projectDir, ".harness", "reviewer-cache", r.spec.Name),
+		spec: spec, sandbox: r.sandbox, project: r.collector.projectDir, state: filepath.Join(r.collector.root, ".harness"), scratch: scratch,
+		cache: filepath.Join(r.collector.root, ".harness", "reviewer-cache", r.spec.Name),
 		stdin: body, stdout: stdout, stderr: stderr,
 	})
 	call.duration, call.sandboxed = result.duration, result.sandboxed
@@ -420,7 +420,7 @@ func (s ReviewSample) OK() bool {
 // non-nil when the reviewer can't be found or set up; problems with its
 // answers are in each sample's Review.
 func (s *Service) TestReviewer(projectDir, name string) (ReviewerSpec, []ReviewSample, error) {
-	c := newCollector(projectDir, "", s.LoadConfig)
+	c := newCollector(projectDir, projectDir, "", s.LoadConfig)
 	c.keys = s.Keys
 	defer c.cleanup()
 	config, err := c.config()
