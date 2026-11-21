@@ -90,6 +90,7 @@ var commands = []command{
 	validateCommand,
 	publishCommand,
 	diffCommand,
+	listCommand,
 	versionsCommand,
 	showCommand,
 	graphCommand,
@@ -106,6 +107,7 @@ var commands = []command{
 	reviewerLoginCommand,
 	reviewerLogoutCommand,
 	uiCommand,
+	mcpCommand,
 }
 
 const overview = `assay checks agent work against contracts you publish.
