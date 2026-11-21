@@ -21,4 +21,4 @@ assay  Contracts  Runs  ›  run SHORT
 
 
 
-r recheck · enter open · esc back · ? help · q quit
+r recheck · w work again · enter open · esc back · ? help · q quit

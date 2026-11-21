@@ -1,0 +1,24 @@
+assay  Contracts  Runs  ›  work on readme@1
+────────────────────────────────────────────────────────────────────────────────
+  Start work on readme@1
+  A worker does the task in a new git worktree. assay checks each attempt and
+  sends back what failed, up to 3 attempts in 30m. Nothing is merged.
+  
+  Task
+  › what the worker should do                                                
+  
+  worker: writer
+  
+  For other limits or a task file, use: assay work readme@1 --help
+
+
+
+
+
+
+
+
+
+
+
+enter start · esc cancel

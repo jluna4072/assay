@@ -195,14 +195,16 @@ func (d *uiData) contractPage(id string) (*uiPage, error) {
 	if len(mine) == 0 {
 		rows = append(rows, uiRow{text: styleDim.Render("none yet — start one with: assay check " + id)})
 	}
-	runRows, err := d.runRows(mine)
+	runRows, active, err := d.runRows(mine)
 	if err != nil {
 		return nil, err
 	}
 	rows = append(rows, runRows...)
 	rows = append(rows, blank)
 	rows = append(rows, ruleRows(latest.Contract, fmt.Sprintf("Rules in v%d", latest.Version))...)
-	return newPage(id, rows, func() (*uiPage, error) { return d.contractPage(id) }).about(uiTarget{contract: id}), nil
+	page := newPage(id, rows, func() (*uiPage, error) { return d.contractPage(id) }).about(uiTarget{contract: id})
+	page.active = active
+	return page, nil
 }
 
 func (d *uiData) versionPage(id string, version int) (*uiPage, error) {
@@ -229,17 +231,21 @@ func (d *uiData) runsPage() (*uiPage, error) {
 		rows := []uiRow{{text: styleDim.Render(`no runs yet. Start one with "assay check <contract>".`)}}
 		return newPage("Runs", rows, d.runsPage), nil
 	}
-	rows, err := d.runRows(runs)
+	rows, active, err := d.runRows(runs)
 	if err != nil {
 		return nil, err
 	}
-	return newPage("Runs", rows, d.runsPage), nil
+	page := newPage("Runs", rows, d.runsPage)
+	page.active = active
+	return page, nil
 }
 
 // runRows is a table of runs with a header, each row opening its run.
-func (d *uiData) runRows(runs []backend.Run) ([]uiRow, error) {
+// A work run's rows open its Work page; active reports that one is still
+// running, so the list should keep itself up to date.
+func (d *uiData) runRows(runs []backend.Run) (rows []uiRow, active bool, err error) {
 	if len(runs) == 0 {
-		return nil, nil
+		return nil, false, nil
 	}
 	full := make([]backend.Run, len(runs))
 	var table bytes.Buffer
@@ -248,11 +254,12 @@ func (d *uiData) runRows(runs []backend.Run) ([]uiRow, error) {
 	for i, run := range runs {
 		var err error
 		if full[i], err = d.s.service.GetRun(run.ID); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		work := ""
 		if w := full[i].Work; w != nil {
 			work = w.Worker + " · " + strings.ReplaceAll(string(w.Outcome), "_", " ")
+			active = active || w.Outcome == backend.WorkRunning
 		}
 		// Statuses are padded here and colored after, so color codes
 		// don't upset the column widths.
@@ -260,7 +267,7 @@ func (d *uiData) runRows(runs []backend.Run) ([]uiRow, error) {
 	}
 	tw.Flush()
 	lines := strings.Split(strings.TrimRight(table.String(), "\n"), "\n")
-	rows := []uiRow{{text: styleDim.Render(lines[0])}}
+	rows = []uiRow{{text: styleDim.Render(lines[0])}}
 	for i, line := range lines[1:] {
 		run := full[i]
 		if status := run.Status; status != "" {
@@ -268,9 +275,13 @@ func (d *uiData) runRows(runs []backend.Run) ([]uiRow, error) {
 				line = line[:at+1] + statusStyle(status, status) + line[at+1+len(status):]
 			}
 		}
-		rows = append(rows, uiRow{text: line, target: uiTarget{run: run.ID}, open: func() (*uiPage, error) { return d.runPage(run.ID) }})
+		open := func() (*uiPage, error) { return d.runPage(run.ID) }
+		if run.Work != nil {
+			open = func() (*uiPage, error) { return d.workPage(run.ID) }
+		}
+		rows = append(rows, uiRow{text: line, target: uiTarget{run: run.ID}, open: open})
 	}
-	return rows, nil
+	return rows, active, nil
 }
 
 // runPage shows a run as "assay show" does: every attempt, its worker,
@@ -303,7 +314,14 @@ func (d *uiData) runPage(id string) (*uiPage, error) {
 			uiRow{text: fmt.Sprintf("branch %s · workspace %s", w.Branch, relative(run.ProjectDir, w.Workspace))},
 			uiRow{text: "task: " + oneLine(w.Task)})
 	}
-	// Newest attempt first: it's the one that decides the run.
+	rows = append(rows, d.attemptRows(run)...)
+	return newPage("run "+shortID(run.ID), rows, func() (*uiPage, error) { return d.runPage(id) }).about(uiTarget{run: id}), nil
+}
+
+// attemptRows lists a run's attempts, newest first since it decides the
+// run, each with its worker and its rules' results, which open.
+func (d *uiData) attemptRows(run backend.Run) []uiRow {
+	var rows []uiRow
 	for i := len(run.Attempts) - 1; i >= 0; i-- {
 		attempt := run.Attempts[i]
 		rows = append(rows, blank, heading(fmt.Sprintf("attempt %d · %s · %s", attempt.Number, attempt.Status, attempt.StartedAt.Local().Format("2006-01-02 15:04:05"))))
@@ -322,7 +340,7 @@ func (d *uiData) runPage(id string) (*uiPage, error) {
 	if len(run.Attempts) == 0 {
 		rows = append(rows, blank, uiRow{text: styleDim.Render("no attempts yet")})
 	}
-	return newPage("run "+shortID(run.ID), rows, func() (*uiPage, error) { return d.runPage(id) }).about(uiTarget{run: id}), nil
+	return rows
 }
 
 // resultPage shows a rule's result in one attempt with all its evidence.

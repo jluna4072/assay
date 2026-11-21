@@ -16,8 +16,10 @@ import (
 
 // uiConfirm is a yes-or-no question the current page asks.
 type uiConfirm struct {
-	yes  string // what y does, for the key line, e.g. "publish docs@2"
-	page *uiPage
+	yes  string  // what y does, for the key line, e.g. "publish docs@2"
+	no   string  // what's said after n
+	page *uiPage // the page the question is about, closed with it; may be nil
+	quit bool    // the question is whether to quit
 	do   func() (note string, err error)
 }
 
@@ -151,7 +153,7 @@ func (m *uiModel) publish(name string) {
 	contract := change.contract // exactly what the diff shows
 	m.welcome = nil
 	m.stack = append(m.stack, page)
-	m.confirm = &uiConfirm{yes: "publish " + ref, page: page, do: func() (string, error) {
+	m.confirm = &uiConfirm{yes: "publish " + ref, no: "nothing published", page: page, do: func() (string, error) {
 		published, changed, err := s.service.PublishContent(contract)
 		if err != nil {
 			return "", err
@@ -182,8 +184,8 @@ func (m *uiModel) answer(key string) tea.Cmd {
 	case "n", "N", "esc", "q":
 		m.closeConfirm()
 		m.reload()
-		m.note = "nothing published"
-	case "down", "j", "up", "k", "pgdown", "pgup", "space", "home", "end", "g", "G":
+		m.note = c.no
+	case "down", "j", "up", "k", "pgdown", "pgup", "space", "home", "end", "g", "G", "shift+g":
 		m.confirm = nil
 		m.key(key)
 		m.confirm = c
@@ -192,7 +194,7 @@ func (m *uiModel) answer(key string) tea.Cmd {
 }
 
 func (m *uiModel) closeConfirm() {
-	if n := len(m.stack); n > 1 && m.stack[n-1] == m.confirm.page {
+	if n := len(m.stack); n > 1 && m.confirm.page != nil && m.stack[n-1] == m.confirm.page {
 		m.stack = m.stack[:n-1]
 	}
 	m.confirm = nil
@@ -301,23 +303,42 @@ func (m *uiModel) keys() string {
 	case m.help:
 		return "esc close help · ctrl+c quit"
 	case m.confirm != nil:
+		if m.confirm.page == nil {
+			return "y " + m.confirm.yes + " · n " + m.confirm.no
+		}
 		return "y " + m.confirm.yes + " · n cancel · ↑↓ scroll"
+	case m.task != nil:
+		if len(m.task.workers) > 1 {
+			return "enter start · tab next worker · esc cancel"
+		}
+		return "enter start · esc cancel"
 	}
 	var parts []string
+	p := m.page()
 	switch t := m.target(); {
 	case t.file != "":
 		parts = append(parts, "e edit", "p publish", "v validate")
 	case t.contract != "":
-		parts = append(parts, "c check")
+		parts = append(parts, "c check", "w work")
 	case t.run != "":
-		parts = append(parts, "r recheck")
+		if m.work != nil && m.work.run == t.run {
+			parts = append(parts, "x cancel")
+		}
+		parts = append(parts, "r recheck", "w work again")
 	}
-	if m.page().cursor >= 0 {
+	if p.live != nil {
+		if p.live.results {
+			parts = append(parts, "tab log")
+		} else {
+			parts = append(parts, "tab results")
+		}
+	}
+	if p.cursor >= 0 {
 		parts = append(parts, "enter open")
 	}
 	if len(m.stack) > 1 {
 		parts = append(parts, "esc back")
-	} else {
+	} else if p.live == nil {
 		parts = append(parts, "tab "+strings.ToLower(tabNames[(m.tab+1)%len(tabNames)]))
 	}
 	parts = append(parts, "? help", "q quit")

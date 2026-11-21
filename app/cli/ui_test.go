@@ -208,6 +208,12 @@ func TestUIScrollsAndReloads(t *testing.T) {
 	if p.offset != 0 {
 		t.Fatalf("home: offset %d", p.offset)
 	}
+	// Some terminals report a capital G as shift+g.
+	m.Update(tea.KeyPressMsg{Code: 'g', Mod: tea.ModShift})
+	if p.offset == 0 {
+		t.Fatal("shift+g didn't jump to the end")
+	}
+	press(m, "g")
 
 	// A new attempt shows up after r.
 	before := len(m.page().rows)
@@ -453,7 +459,7 @@ func TestUICheckAndRecheck(t *testing.T) {
 	if !strings.Contains(m.status, "select one on the Contracts tab") {
 		t.Fatalf("p on runs: %q", m.status)
 	}
-	if keys := m.keys(); !strings.HasPrefix(keys, "r recheck · enter open") {
+	if keys := m.keys(); !strings.HasPrefix(keys, "r recheck · w work again · enter open") {
 		t.Errorf("runs keys: %q", keys)
 	}
 }
