@@ -80,6 +80,42 @@ Each command runs at most once per attempt, however many rules ask for it.
 
 Decoding is strict. Unknown keys (such as a misspelled `depend_on`), duplicate keys, wrong types, and a second YAML document in the same file are reported as problems instead of being ignored.
 
+## Suites
+
+A suite groups contracts that together define "done", such as everything a shippable MCP tool needs, and can be reused in any project. It's a folder with a `suite.yaml` and the contract files it lists:
+
+```
+mcp/
+  suite.yaml
+  server.yaml
+  docs.yaml
+```
+
+```yaml
+version: 1
+id: mcp
+name: Ready-to-ship MCP tool
+contracts: [server, docs]   # server.yaml and docs.yaml; each file's id matches its name
+depends_on:
+  docs: [server]            # docs' rules wait until every server rule passes
+```
+
+A suite is validated, published, and checked as **one contract**: its rules are its contracts' rules, named `<contract>/<rule>` (`server/tests`, `docs/readme`), with their own dependencies plus those between contracts. It passes only when every rule of every contract passes, and everything that works on a contract works on a suite: `check`, `recheck`, `work`, `show`, `evidence`, the UI, and MCP.
+
+Keep suites in your **suite library**, the folder `ASSAY_SUITES` names or `~/.config/assay/suites` (under `$XDG_CONFIG_HOME` if set), and add one to a project:
+
+```
+$ assay suite add mcp
+added assay/suites/mcp from /Users/me/.config/assay/suites/mcp
+✓ assay/suites/mcp: mcp, 2 contracts, 3 rules
+Next: assay contract publish assay/suites/mcp
+$ assay contract publish assay/suites/mcp
+published mcp@1 (3 rules)
+$ assay check mcp
+```
+
+`suite add` copies `suite.yaml` and the contracts it lists into `assay/suites/<id>/`, to commit with the project, then validates the suite there. Commands and reviewers are names, so a suite works in any project that approves what they run: `test` can be `go test ./...` in one project and `npm test` in another. When it names something this project hasn't approved, `suite add` says what, and exits 1. Paths in its rules are relative to each project. `suite add --force` replaces the copy with the library's current version; publish it again to use it. Publishing freezes the suite like any contract, so editing the library never changes a project's published versions or past runs.
+
 ## Approved commands
 
 Contracts can't run arbitrary commands. They name commands you approve in `.assay/config.yaml`, which `assay init` creates. The file lives in `.assay/`, so it isn't committed, and agents and contract authors can't change what a name runs.
@@ -348,7 +384,7 @@ Next: assay contract validate assay/example.yaml
 
 ### `assay contract publish <file>`
 
-Validates the file and stores it as the contract's next version. Published versions never change, and later runs stay tied to the version they started with. Publishing a file that matches the latest version stores nothing:
+Validates the file (or a suite folder) and stores it as the contract's next version. Published versions never change, and later runs stay tied to the version they started with. Publishing a file that matches the latest version stores nothing:
 
 ```
 $ assay contract publish assay/docs.yaml
@@ -392,6 +428,10 @@ Published contracts
 ```
 
 With `--json`, each file has `path`, `valid`, `contract` (`id`, `name`, `rules`) or `problems`, and `published` (`same`, `changed`, or `unpublished`) with `latest`; each contract has `id`, `name`, `latest`, `versions`, and `rules`.
+
+### `assay suite add <name | folder>` and `assay suite list`
+
+`suite add` copies a suite from your library (by name) or any folder (a path with a `/`) into `assay/suites/<id>/` and validates it here; see [Suites](#suites). It exits 0 when the suite is valid here, 1 when it was added but names commands or reviewers this project doesn't have, and 64 when it's already added (`--force` replaces it) or isn't a suite. `suite list` shows the suites in your library and where the library is; `--json` gives each suite's `id`, `name`, `path`, `contracts`, and `rules`, or its `problems`.
 
 ### `assay contract versions <id>`
 

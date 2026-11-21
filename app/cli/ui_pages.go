@@ -80,7 +80,11 @@ func (d *uiData) contractsPage() (*uiPage, error) {
 			line = statusStyle("failed", "✗ "+padRight(name, width)) + "  " + plural(len(result.Problems), "problem")
 		default:
 			c := result.Contract
-			line = statusStyle("passed", "✓ ") + padRight(name, width) + "  " + c.ID + " · " + plural(len(c.Rules), "rule") + " · "
+			size := plural(len(c.Rules), "rule")
+			if len(result.Members) > 0 {
+				size = "suite of " + plural(len(result.Members), "contract") + ", " + size
+			}
+			line = statusStyle("passed", "✓ ") + padRight(name, width) + "  " + c.ID + " · " + size + " · "
 			if p, ok := latest[c.ID]; !ok {
 				line += "not published"
 			} else if backend.SameContent(p.Contract, c) {
@@ -120,7 +124,7 @@ func (d *uiData) filePage(name string) (*uiPage, error) {
 	if !result.Valid() {
 		rows = append(rows, uiRow{text: statusStyle("failed", "✗ "+rel+": "+plural(len(result.Problems), "problem"))}, blank)
 		for _, problem := range result.Problems {
-			rows = append(rows, uiRow{text: rel + ":" + problem.String()})
+			rows = append(rows, uiRow{text: problem.In(rel)})
 		}
 		rows = append(rows, blank, uiRow{text: styleDim.Render("Press e to edit the file; it's checked again when the editor closes.")})
 		return newPage(name, rows, func() (*uiPage, error) { return d.filePage(name) }).about(uiTarget{file: name}), nil

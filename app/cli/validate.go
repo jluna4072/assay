@@ -128,7 +128,7 @@ func plural(n int, noun string) string {
 func printProblems(e Env, path string, problems []contractfile.Problem) {
 	fmt.Fprintf(e.Stdout, "✗ %s: %s\n", path, plural(len(problems), "problem"))
 	for _, problem := range problems {
-		fmt.Fprintf(e.Stdout, "  %s:%s\n", path, problem)
+		fmt.Fprintf(e.Stdout, "  %s\n", problem.In(path))
 	}
 }
 

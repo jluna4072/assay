@@ -94,6 +94,8 @@ var commands = []command{
 	versionsCommand,
 	showCommand,
 	graphCommand,
+	suiteAddCommand,
+	suiteListCommand,
 	checkCommand,
 	workCommand,
 	workspaceListCommand,

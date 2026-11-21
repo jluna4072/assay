@@ -17,8 +17,8 @@ var listCommand = command{
 	details: `
 Lists the contract files in the project's assay/ directory, with whether
 each is valid and whether it is published as is, changed since its latest
-version, or not published; then the published contracts with their latest
-version.
+version, or not published, including the suites in assay/suites/; then the
+published contracts with their latest version.
 
 Flags:
   --json            Print one JSON object instead of text
@@ -37,6 +37,8 @@ type listFileJSON struct {
 	// "unpublished", for valid files.
 	Published string `json:"published,omitempty"`
 	Latest    int    `json:"latest,omitempty"`
+	// Suite lists a suite folder's contracts.
+	Suite []string `json:"suite,omitempty"`
 }
 
 type listContractJSON struct {
@@ -106,6 +108,7 @@ func runList(e Env, cmd *command, args []string) int {
 			c := result.Contract
 			file.Valid = true
 			file.Contract = &contractSummaryJSON{ID: c.ID, Name: c.Name, Rules: len(c.Rules)}
+			file.Suite = result.Members
 			file.Published = "unpublished"
 			if p, ok := latest[c.ID]; ok {
 				file.Latest = p.Version
@@ -145,7 +148,11 @@ func runList(e Env, cmd *command, args []string) int {
 			case "changed":
 				state = fmt.Sprintf("changed since v%d", f.Latest)
 			}
-			fmt.Fprintf(table, "  ✓ %s\t%s · %s · %s\n", f.Path, f.Contract.ID, plural(f.Contract.Rules, "rule"), state)
+			size := plural(f.Contract.Rules, "rule")
+			if len(f.Suite) > 0 {
+				size = "suite of " + plural(len(f.Suite), "contract") + ", " + size
+			}
+			fmt.Fprintf(table, "  ✓ %s\t%s · %s · %s\n", f.Path, f.Contract.ID, size, state)
 		}
 	}
 	table.Flush()
