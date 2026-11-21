@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"harness/backend"
+	"assay/backend"
 )
 
 const valid = `version: 1
@@ -84,7 +84,7 @@ func TestParseProblems(t *testing.T) {
 		{
 			name: "unsupported version",
 			src:  strings.Replace(valid, "version: 1", "version: 2", 1),
-			want: []string{"1:1: unsupported file version 2; this harness reads version 1"},
+			want: []string{"1:1: unsupported file version 2; this version of assay reads version 1"},
 		},
 		{
 			name: "rule problems point at the field or the rule",
@@ -218,7 +218,7 @@ rules:
 
 	// Commands are checked against a project's config separately.
 	result.AddValidation(backend.ValidateCommands(result.Contract, backend.Config{Commands: map[string]backend.CommandSpec{"go-vet": {}}}))
-	if len(result.Problems) != 1 || result.Problems[0].String() != `8:5: rule "tests": command "go-test" isn't approved in .harness/config.yaml` {
+	if len(result.Problems) != 1 || result.Problems[0].String() != `8:5: rule "tests": command "go-test" isn't approved in .assay/config.yaml` {
 		t.Fatalf("unapproved command: %v", result.Problems)
 	}
 
@@ -270,7 +270,7 @@ rules:
 	config.Reviewers["careful"] = backend.ReviewerSpec{Name: "careful", Protocol: backend.CommandProtocol}
 	config.Reviewers["quick"] = backend.ReviewerSpec{Name: "quick", Protocol: backend.CommandProtocol}
 	result.AddValidation(backend.ValidateReviewers(result.Contract, config))
-	if len(result.Problems) != 1 || result.Problems[0].String() != `13:5: rule "tone": the rule doesn't name a reviewer and .harness/config.yaml sets no default_reviewer` {
+	if len(result.Problems) != 1 || result.Problems[0].String() != `13:5: rule "tone": the rule doesn't name a reviewer and .assay/config.yaml sets no default_reviewer` {
 		t.Fatalf("no default: %v", result.Problems)
 	}
 	config.DefaultReviewer = "quick"

@@ -1,8 +1,8 @@
 # Spike: sandboxing approved commands on macOS
 
-Phase 2 lets contracts require the result of user-approved commands (for example, `go test ./...`) as evidence. This spike checks whether harness can run those commands so they can't reach the network, write outside where they're allowed, or read credentials, using macOS's built-in Seatbelt sandbox through `/usr/bin/sandbox-exec`.
+Phase 2 lets contracts require the result of user-approved commands (for example, `go test ./...`) as evidence. This spike checks whether assay can run those commands so they can't reach the network, write outside where they're allowed, or read credentials, using macOS's built-in Seatbelt sandbox through `/usr/bin/sandbox-exec`.
 
-**Verdict: viable.** Every restriction tested held, including for child processes. `sandbox-exec` is marked deprecated, so harness must detect it and refuse to run command evidence unsandboxed unless the user explicitly opts out.
+**Verdict: viable.** Every restriction tested held, including for child processes. `sandbox-exec` is marked deprecated, so assay must detect it and refuse to run command evidence unsandboxed unless the user explicitly opts out.
 
 Tested on macOS 27.2 (build 26B123), Apple silicon, November 2026.
 
@@ -44,20 +44,20 @@ Profile, with `PROJECT` and `SECRETS` passed as parameters (`sandbox-exec -D PRO
 
 ## What this means for Phase 2
 
-1. **Generate a profile per command** from harness's own template, never from contract text. Parameters (`-D`) carry paths, so paths are never spliced into profile source.
-2. **Writes go only to a per-attempt scratch area by default**, `.harness/tmp/<run>/<attempt>/`, with `TMPDIR` pointed there. Not the whole project: if commands could write anywhere in the project, a command could change files after harness captured them as evidence. A command that has to write in the project (a code generator, say) declares it in `.harness/config.yaml` (`writes: project`), and harness captures file and diff evidence before running it.
-3. **Tool caches need a home.** Approved commands declare cache directories (`GOCACHE`, npm's cache, and so on); harness creates them under `.harness/cache/<name>/`, allows writes there, and sets the variables. Caches persist across attempts so runs stay fast.
+1. **Generate a profile per command** from assay's own template, never from contract text. Parameters (`-D`) carry paths, so paths are never spliced into profile source.
+2. **Writes go only to a per-attempt scratch area by default**, `.assay/tmp/<run>/<attempt>/`, with `TMPDIR` pointed there. Not the whole project: if commands could write anywhere in the project, a command could change files after assay captured them as evidence. A command that has to write in the project (a code generator, say) declares it in `.assay/config.yaml` (`writes: project`), and assay captures file and diff evidence before running it.
+3. **Tool caches need a home.** Approved commands declare cache directories (`GOCACHE`, npm's cache, and so on); assay creates them under `.assay/cache/<name>/`, allows writes there, and sets the variables. Caches persist across attempts so runs stay fast.
 4. **No network by default.** Commands must work offline; already-downloaded dependencies are readable. A command can declare `network: localhost` (for tests that start a local server) or, explicitly, `network: on`.
-5. **Deny reads of credential locations** by default: `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.netrc`, `~/.docker`, `~/Library/Keychains`, and harness's own `.harness/harness.db`. Allowing reads only from an allowlist isn't practical, because toolchains read many system paths.
+5. **Deny reads of credential locations** by default: `~/.ssh`, `~/.aws`, `~/.config/gh`, `~/.netrc`, `~/.docker`, `~/Library/Keychains`, and assay's own `.assay/assay.db`. Allowing reads only from an allowlist isn't practical, because toolchains read many system paths.
 6. **The environment is cleared** to an allowlist (`PATH`, `HOME`, `LANG`, plus what the command's config names), as the plan already says. The sandbox doesn't stop a command from reading environment variables it's given.
 
 ## What this means for Phase 4
 
-A process inside a Seatbelt sandbox can't apply another sandbox. Codex sandboxes itself with the same mechanism, so harness can't wrap the worker in its own sandbox and still let Codex apply its sandbox. The worker runs under Codex's sandbox (`--sandbox workspace-write`, network off); harness's sandbox applies to the commands harness itself runs for evidence. The Phase 4 docs need to say this plainly.
+A process inside a Seatbelt sandbox can't apply another sandbox. Codex sandboxes itself with the same mechanism, so assay can't wrap the worker in its own sandbox and still let Codex apply its sandbox. The worker runs under Codex's sandbox (`--sandbox workspace-write`, network off); assay's sandbox applies to the commands assay itself runs for evidence. The Phase 4 docs need to say this plainly.
 
 ## Risks and fallbacks
 
-- **Deprecation.** The man page has called `sandbox-exec` deprecated for years, and it still ships and works; agent tools such as Codex CLI build their macOS sandboxes on it. Apple could still remove it. harness should check that it exists and works (run `/usr/bin/true` under a trivial profile) before running command evidence, and `harness doctor` should report the result.
-- **No sandbox available** (removed, or another OS): refuse to collect command evidence, with an error that says why. `sandbox: off` in `.harness/config.yaml` allows it, and every attempt run that way is recorded as unsandboxed in its evidence.
+- **Deprecation.** The man page has called `sandbox-exec` deprecated for years, and it still ships and works; agent tools such as Codex CLI build their macOS sandboxes on it. Apple could still remove it. assay should check that it exists and works (run `/usr/bin/true` under a trivial profile) before running command evidence, and `assay doctor` should report the result.
+- **No sandbox available** (removed, or another OS): refuse to collect command evidence, with an error that says why. `sandbox: off` in `.assay/config.yaml` allows it, and every attempt run that way is recorded as unsandboxed in its evidence.
 - **Linux** isn't covered by this spike. Landlock (filesystem) plus a network namespace, or bubblewrap, would be the equivalent.
-- **Not tested:** limits on CPU, memory, or process count (the sandbox doesn't provide them; harness's timeout and process-group kill are the backstop), and long-running or interactive commands.
+- **Not tested:** limits on CPU, memory, or process count (the sandbox doesn't provide them; assay's timeout and process-group kill are the backstop), and long-running or interactive commands.

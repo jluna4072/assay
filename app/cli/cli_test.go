@@ -73,15 +73,15 @@ func TestExitCodesAndUsage(t *testing.T) {
 		{[]string{"contract", "validate", "testdata/typo-and-cycle.yaml", "testdata/missing.yaml"}, ExitOperational, "0 valid, 1 invalid, 1 unreadable", ""},
 		{[]string{"contract", "validate"}, ExitUsage, "", "name at least one contract file"},
 		{[]string{"contract", "validate", "--bogus", "x"}, ExitUsage, "", "flag provided but not defined"},
-		{[]string{"contract", "validate", "--help"}, ExitOK, "Usage:\n  harness contract validate <file>...", ""},
+		{[]string{"contract", "validate", "--help"}, ExitOK, "Usage:\n  assay contract validate <file>...", ""},
 		{[]string{"contract", "validate", "--", "--json"}, ExitOperational, "", "open --json"},
 		{[]string{}, ExitUsage, "", "Usage:"},
 		{[]string{"--help"}, ExitOK, "contract validate <file>...", ""},
 		{[]string{"help", "contract", "validate"}, ExitOK, "Reads each YAML contract file", ""},
-		{[]string{"contract"}, ExitUsage, "", "harness contract <command>"},
-		{[]string{"contract", "--help"}, ExitOK, "harness contract <command>", ""},
+		{[]string{"contract"}, ExitUsage, "", "assay contract <command>"},
+		{[]string{"contract", "--help"}, ExitOK, "assay contract <command>", ""},
 		{[]string{"nope"}, ExitUsage, "", `unknown command "nope"`},
-		{[]string{"--version"}, ExitOK, "harness ", ""},
+		{[]string{"--version"}, ExitOK, "assay ", ""},
 	} {
 		t.Run(strings.Join(tc.args, " "), func(t *testing.T) {
 			stdout, stderr, code := run(tc.args...)

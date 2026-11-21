@@ -36,7 +36,7 @@ const (
 	DefaultAnthropicKeyEnv   = "ANTHROPIC_API_KEY"
 )
 
-// MaxChatInput bounds the request harness sends to a chat model (about
+// MaxChatInput bounds the request assay sends to a chat model (about
 // 100,000 tokens). Larger evidence is an error, not a review of part of it.
 const MaxChatInput = 400 << 10
 
@@ -45,7 +45,7 @@ const chatOutputTokens = 16000
 
 // reviewerInstructions is the system prompt every chat reviewer gets. It's
 // part of each recorded request, so changing it changes the request hash.
-const reviewerInstructions = `You are a reviewer for harness, an automated checker of software work. You decide whether one acceptance criterion is met, using only the numbered evidence items you're given.
+const reviewerInstructions = `You are a reviewer for assay, an automated checker of software work. You decide whether one acceptance criterion is met, using only the numbered evidence items you're given.
 
 Answer with a verdict:
 - "pass" only if the evidence clearly shows the criterion is met.
@@ -96,7 +96,7 @@ func parseChatVerdict(text string, items int, review *Review) error {
 }
 
 func tooLarge(reviewer ReviewerSpec, size, limit int) error {
-	return fmt.Errorf("the evidence is too large for %s: the request would be %d bytes, more than the %d harness sends to it", reviewer.Name, size, limit)
+	return fmt.Errorf("the evidence is too large for %s: the request would be %d bytes, more than the %d assay sends to it", reviewer.Name, size, limit)
 }
 
 // openAIReviewer calls an OpenAI-compatible chat completions API.
@@ -240,13 +240,13 @@ func (r *anthropicReviewer) call(request ReviewRequest) (reviewCall, error) {
 		return response, readErr
 	}
 	client := anthropic.NewClient(
-		option.WithoutEnvironmentDefaults(), // only the key harness found, never ambient credentials
+		option.WithoutEnvironmentDefaults(), // only the key assay found, never ambient credentials
 		option.WithBaseURL(spec.Endpoint+"/"),
 		option.WithAPIKey(key),
 		option.WithHTTPClient(&http.Client{Timeout: spec.Timeout}),
 		option.WithMaxRetries(1),
 		option.WithMiddleware(record),
-		option.WithHeader("User-Agent", "harness"),
+		option.WithHeader("User-Agent", "assay"),
 	)
 	ctx, cancel := context.WithTimeout(context.Background(), spec.Timeout)
 	defer cancel()

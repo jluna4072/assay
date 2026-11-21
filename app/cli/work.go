@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"harness/backend"
+	"assay/backend"
 )
 
 var workCommand = command{
@@ -23,11 +23,11 @@ Makes a workspace (a git worktree of the last commit, on a new branch),
 then repeats until every rule of the contract passes or a limit is
 reached: run the worker with the task, check the workspace, and, if rules
 failed, run the worker again with what failed and why. Each attempt's
-changes are committed to the branch. Only harness decides that the work is
-accepted; the worker's own claims count for nothing. harness never merges
+changes are committed to the branch. Only assay decides that the work is
+accepted; the worker's own claims count for nothing. assay never merges
 the branch: review it and merge it yourself.
 
-The worker is a program configured under workers: in .harness/config.yaml.
+The worker is a program configured under workers: in .assay/config.yaml.
 It gets the task, the rules, and any failures on stdin, and runs in the
 workspace.
 
@@ -73,12 +73,12 @@ func runWork(e Env, cmd *command, args []string) int {
 		return code
 	}
 	if *maxAttempts < 0 || *timeout < 0 || (*timeout > 0 && *timeout < time.Second) {
-		fmt.Fprintln(e.Stderr, "harness work: --max-attempts must be at least 1 and --timeout at least 1s")
+		fmt.Fprintln(e.Stderr, "assay work: --max-attempts must be at least 1 and --timeout at least 1s")
 		return ExitUsage
 	}
 	if *resume != "" {
 		if len(refs) > 0 || *task != "" || *taskFile != "" || *worker != "" {
-			fmt.Fprintln(e.Stderr, "harness work: --resume continues a run with its own contract, task, and worker; give only the run and limits")
+			fmt.Fprintln(e.Stderr, "assay work: --resume continues a run with its own contract, task, and worker; give only the run and limits")
 			return ExitUsage
 		}
 		return resumeWork(e, cmd, *projectDir, *resume, *maxAttempts, *timeout, *quiet, *asJSON)
@@ -90,35 +90,35 @@ func runWork(e Env, cmd *command, args []string) int {
 		*timeout = backend.DefaultWorkTimeout
 	}
 	if len(refs) != 1 {
-		fmt.Fprintln(e.Stderr, "harness work: name exactly one contract, like docs or docs@2")
+		fmt.Fprintln(e.Stderr, "assay work: name exactly one contract, like docs or docs@2")
 		return ExitUsage
 	}
 	switch {
 	case *task != "" && *taskFile != "":
-		fmt.Fprintln(e.Stderr, "harness work: use --task or --task-file, not both")
+		fmt.Fprintln(e.Stderr, "assay work: use --task or --task-file, not both")
 		return ExitUsage
 	case *taskFile == "-":
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
-			fmt.Fprintf(e.Stderr, "harness work: read the task: %v\n", err)
+			fmt.Fprintf(e.Stderr, "assay work: read the task: %v\n", err)
 			return ExitOperational
 		}
 		*task = string(data)
 	case *taskFile != "":
 		data, err := os.ReadFile(resolve(e, *taskFile))
 		if err != nil {
-			fmt.Fprintf(e.Stderr, "harness work: %v\n", err)
+			fmt.Fprintf(e.Stderr, "assay work: %v\n", err)
 			return ExitOperational
 		}
 		*task = string(data)
 	}
 	if strings.TrimSpace(*task) == "" {
-		fmt.Fprintln(e.Stderr, "harness work: say what to do with --task \"...\" or --task-file <path>")
+		fmt.Fprintln(e.Stderr, "assay work: say what to do with --task \"...\" or --task-file <path>")
 		return ExitUsage
 	}
 	id, version, err := parseRef(refs[0])
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness work: %v\n", err)
+		fmt.Fprintf(e.Stderr, "assay work: %v\n", err)
 		return ExitUsage
 	}
 	s, code := openProject(e, cmd, *projectDir)
@@ -142,7 +142,7 @@ func runWork(e Env, cmd *command, args []string) int {
 		Task: *task, Worker: *worker, MaxAttempts: *maxAttempts, Timeout: *timeout,
 	}, printer.event)
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness work: %v\n", err)
+		fmt.Fprintf(e.Stderr, "assay work: %v\n", err)
 		return ExitOperational
 	}
 	return finishWork(e, s, run, *asJSON)
@@ -175,7 +175,7 @@ func resumeWork(e Env, cmd *command, projectDir, prefix string, maxAttempts int,
 	printer := &workPrinter{w: e.Stderr, root: s.project.Root, quiet: quiet}
 	run, err := s.service.ResumeWork(ctx, backend.ResumeOptions{RunID: run.ID, MaxAttempts: maxAttempts, Timeout: timeout}, printer.event)
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness work: %v\n", err)
+		fmt.Fprintf(e.Stderr, "assay work: %v\n", err)
 		return ExitUsage
 	}
 	return finishWork(e, s, run, asJSON)
@@ -277,11 +277,11 @@ func printWorkResult(w io.Writer, run backend.Run, root string) {
 	fmt.Fprintf(w, "branch %s · workspace %s\n", work.Branch, relative(root, work.Workspace))
 	switch work.Outcome {
 	case backend.WorkAccepted:
-		fmt.Fprintf(w, "Review the changes with: git diff %s...%s\nThen merge the branch yourself; harness never merges.\n", shortCommit(run.Baseline), work.Branch)
+		fmt.Fprintf(w, "Review the changes with: git diff %s...%s\nThen merge the branch yourself; assay never merges.\n", shortCommit(run.Baseline), work.Branch)
 	case backend.WorkRejected:
-		fmt.Fprintf(w, "See every attempt with: harness show %s\nAllow more attempts with: harness work --resume %s --max-attempts %d\n", shortID(run.ID), shortID(run.ID), work.MaxAttempts+2)
+		fmt.Fprintf(w, "See every attempt with: assay show %s\nAllow more attempts with: assay work --resume %s --max-attempts %d\n", shortID(run.ID), shortID(run.ID), work.MaxAttempts+2)
 	default:
-		fmt.Fprintf(w, "See every attempt with: harness show %s\nContinue with: harness work --resume %s\n", shortID(run.ID), shortID(run.ID))
+		fmt.Fprintf(w, "See every attempt with: assay show %s\nContinue with: assay work --resume %s\n", shortID(run.ID), shortID(run.ID))
 	}
 }
 
@@ -300,7 +300,7 @@ var followPoll = 250 * time.Millisecond
 // recorded, until the run finishes. Another process may be running it.
 func followRun(e Env, s *session, run backend.Run, asJSON, quiet bool) int {
 	if run.Work == nil {
-		fmt.Fprintf(e.Stderr, "harness show: run %s wasn't made by \"harness work\", so there's nothing to follow\n", shortID(run.ID))
+		fmt.Fprintf(e.Stderr, "assay show: run %s wasn't made by \"assay work\", so there's nothing to follow\n", shortID(run.ID))
 		return ExitUsage
 	}
 	ctx, stop := interruptible(e)
@@ -310,12 +310,12 @@ func followRun(e Env, s *session, run backend.Run, asJSON, quiet bool) int {
 	for {
 		events, err := s.service.Events(run.ID, after)
 		if err != nil {
-			fmt.Fprintf(e.Stderr, "harness show: %v\n", err)
+			fmt.Fprintf(e.Stderr, "assay show: %v\n", err)
 			return ExitOperational
 		}
 		current, err := s.service.GetRun(run.ID)
 		if err != nil {
-			fmt.Fprintf(e.Stderr, "harness show: %v\n", err)
+			fmt.Fprintf(e.Stderr, "assay show: %v\n", err)
 			return ExitOperational
 		}
 		finished := false

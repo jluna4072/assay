@@ -11,7 +11,7 @@ import (
 // TestBinaryExitCodes builds the real binary and checks that cli.Run's exit
 // codes reach the process.
 func TestBinaryExitCodes(t *testing.T) {
-	binary := filepath.Join(t.TempDir(), "harness")
+	binary := filepath.Join(t.TempDir(), "assay")
 	if out, err := exec.Command("go", "build", "-o", binary, ".").CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
 	}

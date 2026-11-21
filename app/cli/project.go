@@ -5,20 +5,21 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
-	"harness/backend"
-	"harness/project"
-	"harness/storage"
+	"assay/backend"
+	"assay/project"
+	"assay/storage"
 )
 
 const projectFlagHelp = `  --project <dir>   Use the project rooted at <dir> instead of searching
-                    upward from the working directory for .harness/`
+                    upward from the working directory for .assay/`
 
-const exampleContract = `# An example harness contract. Edit it, then:
-#   harness contract validate harness/example.yaml
-#   harness contract publish harness/example.yaml
+const exampleContract = `# An example assay contract. Edit it, then:
+#   assay contract validate assay/example.yaml
+#   assay contract publish assay/example.yaml
 version: 1
 id: example
 name: Example contract
@@ -32,12 +33,12 @@ rules:
 var initCommand = command{
 	name:    "init",
 	args:    "[dir]",
-	summary: "Create a harness project in dir (default: the working directory)",
+	summary: "Create an assay project in dir (default: the working directory)",
 	details: `
-Creates .harness/ (local state: the database of published contracts and runs,
-and config.yaml, where you approve commands contracts may run) and harness/
+Creates .assay/ (local state: the database of published contracts and runs,
+and config.yaml, where you approve commands contracts may run) and assay/
 (contract files you commit), with an example contract. Inside a git
-repository, adds .harness/ to .gitignore. Running it again changes nothing
+repository, adds .assay/ to .gitignore. Running it again changes nothing
 that already exists.
 
 Flags:
@@ -66,16 +67,16 @@ func openProject(e Env, cmd *command, dir string) (*session, int) {
 		p, err = project.Find(e.Dir)
 	}
 	if errors.Is(err, project.ErrNotFound) {
-		fmt.Fprintf(e.Stderr, "harness %s: %v\nRun \"harness init\" to create one.\n", cmd.name, err)
+		fmt.Fprintf(e.Stderr, "assay %s: %v\nRun \"assay init\" to create one.\n", cmd.name, err)
 		return nil, ExitUsage
 	}
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)
+		fmt.Fprintf(e.Stderr, "assay %s: %v\n", cmd.name, err)
 		return nil, ExitOperational
 	}
 	store, err := storage.Open(p.DatabasePath())
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness %s: open %s: %v\n", cmd.name, p.DatabasePath(), err)
+		fmt.Fprintf(e.Stderr, "assay %s: open %s: %v\n", cmd.name, p.DatabasePath(), err)
 		return nil, ExitOperational
 	}
 	service := backend.NewService(store)
@@ -97,7 +98,8 @@ type initJSON struct {
 	Root      string   `json:"root"`
 	Created   []string `json:"created"`
 	Existing  []string `json:"existing"`
-	Gitignore string   `json:"gitignore"` // "added", "present", or "not a git repository"
+	Gitignore string   `json:"gitignore"`          // "added", "present", or "not a git repository"
+	Migrated  []string `json:"migrated,omitempty"` // what was moved from a project made before the rename
 }
 
 func runInit(e Env, cmd *command, args []string) int {
@@ -108,7 +110,7 @@ func runInit(e Env, cmd *command, args []string) int {
 		return code
 	}
 	if len(positional) > 1 {
-		fmt.Fprintf(e.Stderr, "harness init: expected at most one directory, got %d\n", len(positional))
+		fmt.Fprintf(e.Stderr, "assay init: expected at most one directory, got %d\n", len(positional))
 		return ExitUsage
 	}
 	dir := e.Dir
@@ -123,13 +125,26 @@ func runInit(e Env, cmd *command, args []string) int {
 		}
 	}
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness init: %v\n", err)
+		fmt.Fprintf(e.Stderr, "assay init: %v\n", err)
 		return ExitOperational
 	}
 	p := project.Project{Root: root}
 	out := initJSON{Schema: JSONSchema, Root: root, Created: []string{}, Existing: []string{}}
+	if project.HasLegacy(root) {
+		moved, err := migrateLegacy(root)
+		for _, line := range moved {
+			if !*asJSON {
+				fmt.Fprintf(e.Stdout, "moved    %s\n", line)
+			}
+		}
+		if err != nil {
+			fmt.Fprintf(e.Stderr, "assay init: moving the project over from harness: %v\n", err)
+			return ExitOperational
+		}
+		out.Migrated = moved
+	}
 	fail := func(err error) int {
-		fmt.Fprintf(e.Stderr, "harness init: %v\n", err)
+		fmt.Fprintf(e.Stderr, "assay init: %v\n", err)
 		return ExitOperational
 	}
 	note := func(rel string, existed bool) {
@@ -142,7 +157,7 @@ func runInit(e Env, cmd *command, args []string) int {
 
 	dbRel := filepath.Join(project.StateDir, project.DatabaseFile)
 	_, statErr := os.Stat(p.DatabasePath())
-	store, err := storage.Open(p.DatabasePath()) // creates .harness/ and the schema
+	store, err := storage.Open(p.DatabasePath()) // creates .assay/ and the schema
 	if err != nil {
 		return fail(err)
 	}
@@ -204,12 +219,12 @@ func runInit(e Env, cmd *command, args []string) int {
 		fmt.Fprintf(e.Stdout, "added    /%s/ to .gitignore\n", project.StateDir)
 	}
 	if len(out.Created) == 0 {
-		fmt.Fprintf(e.Stdout, "harness project already initialized in %s\n", root)
+		fmt.Fprintf(e.Stdout, "assay project already initialized in %s\n", root)
 		return ExitOK
 	}
-	fmt.Fprintf(e.Stdout, "Initialized harness project in %s\n", root)
+	fmt.Fprintf(e.Stdout, "Initialized assay project in %s\n", root)
 	if len(existing) == 0 {
-		fmt.Fprintf(e.Stdout, "Next: harness contract validate %s\n", exampleRel)
+		fmt.Fprintf(e.Stdout, "Next: assay contract validate %s\n", exampleRel)
 	}
 	return ExitOK
 }
@@ -231,4 +246,35 @@ func contractFiles(dir string) ([]string, error) {
 		}
 	}
 	return files, nil
+}
+
+// migrateLegacy moves a project made before the rename to assay's names,
+// then updates the workspace paths stored in its database and repairs
+// the git worktrees that moved with it.
+func migrateLegacy(root string) ([]string, error) {
+	moved, err := project.MigrateLegacy(root)
+	if err != nil {
+		return moved, err
+	}
+	store, err := storage.Open(project.Project{Root: root}.DatabasePath())
+	if err != nil {
+		return moved, err
+	}
+	n, err := store.MoveWorkspaces(filepath.Join(root, project.LegacyStateDir), filepath.Join(root, project.StateDir))
+	store.Close()
+	if err != nil {
+		return moved, err
+	}
+	if n > 0 {
+		workspaces, _ := filepath.Glob(filepath.Join(root, project.StateDir, "workspaces", "*"))
+		if len(workspaces) > 0 {
+			repair := exec.Command("git", append([]string{"worktree", "repair"}, workspaces...)...)
+			repair.Dir = root
+			if out, err := repair.CombinedOutput(); err != nil {
+				return moved, fmt.Errorf("git worktree repair: %v: %s", err, strings.TrimSpace(string(out)))
+			}
+		}
+		moved = append(moved, fmt.Sprintf("%d work runs' workspace paths updated", n))
+	}
+	return moved, nil
 }

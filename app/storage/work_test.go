@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"harness/backend"
+	"assay/backend"
 )
 
 // workProject is a git repository with one commit and a contract that needs
@@ -18,7 +18,7 @@ import (
 func workProject(t *testing.T) (string, *backend.Service) {
 	t.Helper()
 	dir := gitRepo(t)
-	os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("/.harness/\n"), 0644)
+	os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("/.assay/\n"), 0644)
 	os.WriteFile(filepath.Join(dir, "main.txt"), []byte("start\n"), 0644)
 	commitAll(t, dir)
 	store, s := openTest(t)
@@ -96,7 +96,7 @@ func TestWorkAcceptsAfterRepair(t *testing.T) {
 		t.Fatalf("commits: %q %q", first.Worker.Commit, second.Worker.Commit)
 	}
 	log, _ := exec.Command("git", "-C", dir, "log", "--format=%s", w.Branch).Output()
-	if !strings.HasPrefix(string(log), "harness: attempt 2 of run "+strings.ToLower(run.ID)+"\nharness: attempt 1 of run") {
+	if !strings.HasPrefix(string(log), "assay: attempt 2 of run "+strings.ToLower(run.ID)+"\nassay: attempt 1 of run") {
 		t.Fatalf("branch log:\n%s", log)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "README.md")); err == nil {
@@ -195,7 +195,7 @@ func TestWorkNeedsARepositoryAndAWorker(t *testing.T) {
 }
 
 // A sandboxed worker can write in its workspace, but not to the project,
-// harness's state, or anywhere else.
+// assay's state, or anywhere else.
 func TestSandboxLimitsWorkers(t *testing.T) {
 	requireSandbox(t)
 	dir, s := workProject(t)
@@ -203,7 +203,7 @@ func TestSandboxLimitsWorkers(t *testing.T) {
 	script := `cat >/dev/null
 echo "# Project" > README.md && echo wrote-workspace
 echo x > "` + dir + `/escaped.txt" 2>/dev/null && echo wrote-project
-echo x > "` + dir + `/.harness/escaped.txt" 2>/dev/null && echo wrote-state
+echo x > "` + dir + `/.assay/escaped.txt" 2>/dev/null && echo wrote-state
 echo x > "` + home + `/escaped.txt" 2>/dev/null && echo wrote-elsewhere
 echo done > done.txt
 true`
@@ -215,7 +215,7 @@ true`
 	if run.Work.Outcome != backend.WorkAccepted || !run.Attempts[0].Worker.Sandboxed {
 		t.Fatalf("work: %+v", run.Work)
 	}
-	for _, path := range []string{filepath.Join(dir, "escaped.txt"), filepath.Join(dir, ".harness", "escaped.txt"), filepath.Join(home, "escaped.txt")} {
+	for _, path := range []string{filepath.Join(dir, "escaped.txt"), filepath.Join(dir, ".assay", "escaped.txt"), filepath.Join(home, "escaped.txt")} {
 		if _, err := os.Stat(path); err == nil {
 			t.Errorf("the worker wrote %s", path)
 		}

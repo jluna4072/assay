@@ -61,13 +61,13 @@ func ValidateCommands(contract Contract, config Config) error {
 	for i, rule := range contract.Rules {
 		if rule.Kind == CommandSucceeds && CommandName(rule.Command) {
 			if _, ok := config.Commands[rule.Command]; !ok {
-				problems = append(problems, &ValidationError{Rule: i, RuleID: rule.ID, Field: "command", Message: fmt.Sprintf("command %q isn't approved in .harness/config.yaml", rule.Command)})
+				problems = append(problems, &ValidationError{Rule: i, RuleID: rule.ID, Field: "command", Message: fmt.Sprintf("command %q isn't approved in .assay/config.yaml", rule.Command)})
 			}
 		}
 		for _, spec := range rule.Evidence {
 			if spec.Kind == CommandEvidence && CommandName(spec.Command) {
 				if _, ok := config.Commands[spec.Command]; !ok {
-					problems = append(problems, &ValidationError{Rule: i, RuleID: rule.ID, Field: "evidence", Message: fmt.Sprintf("command %q isn't approved in .harness/config.yaml", spec.Command)})
+					problems = append(problems, &ValidationError{Rule: i, RuleID: rule.ID, Field: "evidence", Message: fmt.Sprintf("command %q isn't approved in .assay/config.yaml", spec.Command)})
 				}
 			}
 		}

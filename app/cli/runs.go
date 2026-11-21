@@ -9,7 +9,7 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"harness/backend"
+	"assay/backend"
 )
 
 const shortIDLength = 6
@@ -79,7 +79,7 @@ shortened to any unique prefix.
 Flags:
   --attempt <n>     Only attempt n
   --evidence        List the evidence recorded for each rule
-  --follow          For a run made by "harness work": print its progress
+  --follow          For a run made by "assay work": print its progress
                     from the start, then as it happens, until it ends
                     (Ctrl-C stops following, not the run). With --json,
                     print one JSON object per event, one per line
@@ -148,7 +148,7 @@ type resultJSON struct {
 	Review   *reviewJSON    `json:"review,omitempty"`
 }
 
-// evidenceJSON describes one recorded evidence item; "harness evidence"
+// evidenceJSON describes one recorded evidence item; "assay evidence"
 // prints its content.
 type evidenceJSON struct {
 	Kind      string   `json:"kind"`
@@ -238,11 +238,11 @@ func listRuns(s *session) ([]backend.Run, error) {
 func findRun(e Env, cmd *command, s *session, prefix string) (backend.Run, int) {
 	runs, err := listRuns(s)
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)
+		fmt.Fprintf(e.Stderr, "assay %s: %v\n", cmd.name, err)
 		return backend.Run{}, ExitOperational
 	}
 	if len(runs) == 0 {
-		fmt.Fprintf(e.Stderr, "harness %s: no runs yet. Start one with \"harness check <contract>\".\n", cmd.name)
+		fmt.Fprintf(e.Stderr, "assay %s: no runs yet. Start one with \"assay check <contract>\".\n", cmd.name)
 		return backend.Run{}, ExitUsage
 	}
 	var matches []backend.Run
@@ -257,17 +257,17 @@ func findRun(e Env, cmd *command, s *session, prefix string) (backend.Run, int) 
 	}
 	switch len(matches) {
 	case 0:
-		fmt.Fprintf(e.Stderr, "harness %s: no run matches %q. List runs with \"harness runs\".\n", cmd.name, prefix)
+		fmt.Fprintf(e.Stderr, "assay %s: no run matches %q. List runs with \"assay runs\".\n", cmd.name, prefix)
 		return backend.Run{}, ExitUsage
 	case 1:
 		run, err := s.service.GetRun(matches[0].ID)
 		if err != nil {
-			fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)
+			fmt.Fprintf(e.Stderr, "assay %s: %v\n", cmd.name, err)
 			return backend.Run{}, ExitOperational
 		}
 		return run, ExitOK
 	default:
-		fmt.Fprintf(e.Stderr, "harness %s: %q matches %d runs; use more characters:\n", cmd.name, prefix, len(matches))
+		fmt.Fprintf(e.Stderr, "assay %s: %q matches %d runs; use more characters:\n", cmd.name, prefix, len(matches))
 		for _, run := range matches {
 			fmt.Fprintf(e.Stderr, "  %s  %s@%d  %s\n", strings.ToLower(run.ID), run.ContractID, run.Version, run.CreatedAt.Local().Format("2006-01-02 15:04"))
 		}
@@ -440,7 +440,7 @@ func printAttempt(w io.Writer, run backend.Run) {
 	if n := counts[backend.Passed]; n > 0 {
 		parts = append(parts, fmt.Sprintf("%d passed", n))
 	}
-	fmt.Fprintf(w, "%s · fix, then: harness recheck %s\n", strings.Join(parts, ", "), shortID(run.ID))
+	fmt.Fprintf(w, "%s · fix, then: assay recheck %s\n", strings.Join(parts, ", "), shortID(run.ID))
 }
 
 func runCheck(e Env, cmd *command, args []string) int {
@@ -452,12 +452,12 @@ func runCheck(e Env, cmd *command, args []string) int {
 		return code
 	}
 	if len(refs) != 1 {
-		fmt.Fprintln(e.Stderr, "harness check: name exactly one contract, like docs or docs@2")
+		fmt.Fprintln(e.Stderr, "assay check: name exactly one contract, like docs or docs@2")
 		return ExitUsage
 	}
 	id, version, err := parseRef(refs[0])
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness check: %v\n", err)
+		fmt.Fprintf(e.Stderr, "assay check: %v\n", err)
 		return ExitUsage
 	}
 	s, code := openProject(e, cmd, *projectDir)
@@ -472,7 +472,7 @@ func runCheck(e Env, cmd *command, args []string) int {
 	}
 	run, err := s.service.StartRun(id, published.Version, s.project.Root)
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness check: %v\n", err)
+		fmt.Fprintf(e.Stderr, "assay check: %v\n", err)
 		return ExitOperational
 	}
 	return evaluate(e, cmd, s, run, *asJSON)
@@ -487,7 +487,7 @@ func runRecheck(e Env, cmd *command, args []string) int {
 		return code
 	}
 	if len(ids) > 1 {
-		fmt.Fprintln(e.Stderr, "harness recheck: name at most one run")
+		fmt.Fprintln(e.Stderr, "assay recheck: name at most one run")
 		return ExitUsage
 	}
 	s, code := openProject(e, cmd, *projectDir)
@@ -514,7 +514,7 @@ func evaluate(e Env, cmd *command, s *session, run backend.Run, asJSON bool) int
 	}
 	run, err := s.service.EvaluateAttempt(run.ID)
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)
+		fmt.Fprintf(e.Stderr, "assay %s: %v\n", cmd.name, err)
 		return ExitOperational
 	}
 	attempt := run.Attempts[len(run.Attempts)-1]
@@ -551,11 +551,11 @@ func runRuns(e Env, cmd *command, args []string) int {
 		return code
 	}
 	if len(rest) > 0 {
-		fmt.Fprintf(e.Stderr, "harness runs: unexpected argument %q\n", rest[0])
+		fmt.Fprintf(e.Stderr, "assay runs: unexpected argument %q\n", rest[0])
 		return ExitUsage
 	}
 	if *limit < 0 {
-		fmt.Fprintln(e.Stderr, "harness runs: --limit must be 0 or more")
+		fmt.Fprintln(e.Stderr, "assay runs: --limit must be 0 or more")
 		return ExitUsage
 	}
 	s, code := openProject(e, cmd, *projectDir)
@@ -566,7 +566,7 @@ func runRuns(e Env, cmd *command, args []string) int {
 
 	all, err := listRuns(s)
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness runs: %v\n", err)
+		fmt.Fprintf(e.Stderr, "assay runs: %v\n", err)
 		return ExitOperational
 	}
 	summaries := []runSummaryJSON{}
@@ -579,7 +579,7 @@ func runRuns(e Env, cmd *command, args []string) int {
 		}
 		full, err := s.service.GetRun(run.ID)
 		if err != nil {
-			fmt.Fprintf(e.Stderr, "harness runs: %v\n", err)
+			fmt.Fprintf(e.Stderr, "assay runs: %v\n", err)
 			return ExitOperational
 		}
 		summaries = append(summaries, runSummaryJSON{
@@ -595,7 +595,7 @@ func runRuns(e Env, cmd *command, args []string) int {
 		return ExitOK
 	}
 	if len(summaries) == 0 {
-		fmt.Fprintln(e.Stdout, "no runs yet. Start one with \"harness check <contract>\".")
+		fmt.Fprintln(e.Stdout, "no runs yet. Start one with \"assay check <contract>\".")
 		return ExitOK
 	}
 	table := tabwriter.NewWriter(e.Stdout, 0, 0, 2, ' ', 0)
@@ -620,11 +620,11 @@ func runShowRun(e Env, cmd *command, args []string) int {
 		return code
 	}
 	if len(ids) > 1 {
-		fmt.Fprintln(e.Stderr, "harness show: name at most one run")
+		fmt.Fprintln(e.Stderr, "assay show: name at most one run")
 		return ExitUsage
 	}
 	if *only < 0 {
-		fmt.Fprintln(e.Stderr, "harness show: --attempt must be a positive number")
+		fmt.Fprintln(e.Stderr, "assay show: --attempt must be a positive number")
 		return ExitUsage
 	}
 	s, code := openProject(e, cmd, *projectDir)
@@ -643,7 +643,7 @@ func runShowRun(e Env, cmd *command, args []string) int {
 	}
 	if *follow {
 		if *only > 0 || *withEvidence {
-			fmt.Fprintln(e.Stderr, "harness show: --follow can't be combined with --attempt or --evidence")
+			fmt.Fprintln(e.Stderr, "assay show: --follow can't be combined with --attempt or --evidence")
 			return ExitUsage
 		}
 		return followRun(e, s, run, *asJSON, *quiet)
@@ -651,7 +651,7 @@ func runShowRun(e Env, cmd *command, args []string) int {
 	attempts := run.Attempts
 	if *only > 0 {
 		if *only > len(run.Attempts) {
-			fmt.Fprintf(e.Stderr, "harness show: run %s has %s\n", shortID(run.ID), plural(len(run.Attempts), "attempt"))
+			fmt.Fprintf(e.Stderr, "assay show: run %s has %s\n", shortID(run.ID), plural(len(run.Attempts), "attempt"))
 			return ExitUsage
 		}
 		attempts = run.Attempts[*only-1 : *only]
@@ -687,7 +687,7 @@ func runShowRun(e Env, cmd *command, args []string) int {
 		printResults(e.Stdout, attempt, *withEvidence)
 	}
 	if *withEvidence {
-		fmt.Fprintf(e.Stdout, "\nPrint an item with: harness evidence %s <rule> [--attempt n] [--item n]\n", shortID(run.ID))
+		fmt.Fprintf(e.Stdout, "\nPrint an item with: assay evidence %s <rule> [--attempt n] [--item n]\n", shortID(run.ID))
 	}
 	return ExitOK
 }

@@ -43,7 +43,7 @@ var protocolDefaults = map[ReviewProtocol]APISpec{
 }
 
 // UsesAPIKey reports whether a reviewer's protocol calls an HTTP API with
-// an API key that harness looks up.
+// an API key that assay looks up.
 func UsesAPIKey(protocol ReviewProtocol) bool {
 	_, ok := protocolDefaults[protocol]
 	return ok
@@ -81,7 +81,7 @@ const (
 	DefaultDecisionThreshold = 0.9
 )
 
-// MaxDecisionInput bounds the request harness sends to a decision model.
+// MaxDecisionInput bounds the request assay sends to a decision model.
 // Jev reads about 32,000 tokens of input; larger evidence is an error, not
 // a review of part of it.
 const MaxDecisionInput = 128 << 10
@@ -182,11 +182,11 @@ type decisionsReviewer struct {
 	keys KeySource
 }
 
-// The question harness asks. The criterion is part of the question; the
+// The question assay asks. The criterion is part of the question; the
 // evidence is the input.
 const (
 	decisionQuestion = "criterion_met"
-	decisionPreamble = "Evidence recorded by harness, an automated checker, for one acceptance criterion. Judge only this evidence; don't assume anything it doesn't show."
+	decisionPreamble = "Evidence recorded by assay, an automated checker, for one acceptance criterion. Judge only this evidence; don't assume anything it doesn't show."
 )
 
 type decisionsRequest struct {
@@ -300,7 +300,7 @@ func postJSON(reviewer ReviewerSpec, keys KeySource, target string, body []byte,
 		return call, err
 	}
 	httpRequest.Header.Set("Content-Type", "application/json")
-	httpRequest.Header.Set("User-Agent", "harness")
+	httpRequest.Header.Set("User-Agent", "assay")
 	switch {
 	case authorize != nil:
 		authorize(httpRequest, key)
@@ -342,9 +342,9 @@ func httpStatusError(reviewer ReviewerSpec, key string, status int, data []byte)
 		// another (a TypeSafe key to a gateway, say) fails here. A key from
 		// the environment variable overrides a saved one, so logging in
 		// again wouldn't help; say to fix the variable instead.
-		fix := fmt.Sprintf("replace it with \"harness reviewer login %s\"", reviewer.Name)
+		fix := fmt.Sprintf("replace it with \"assay reviewer login %s\"", reviewer.Name)
 		if env := strings.TrimSpace(lookupEnv(spec.KeyEnv)); env != "" && env == key {
-			fix = fmt.Sprintf("fix or unset %s, which overrides any key saved with \"harness reviewer login\"", spec.KeyEnv)
+			fix = fmt.Sprintf("fix or unset %s, which overrides any key saved with \"assay reviewer login\"", spec.KeyEnv)
 		}
 		return fmt.Errorf("reviewer %s: %s rejected the API key (HTTP %d%s). Check that it's a key for %s, then %s", reviewer.Name, spec.Host(), status, apiMessage(data), spec.Host(), fix)
 	case status != http.StatusOK:

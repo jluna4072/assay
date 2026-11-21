@@ -7,7 +7,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"harness/backend"
+	"assay/backend"
 )
 
 var evidenceCommand = command{
@@ -15,7 +15,7 @@ var evidenceCommand = command{
 	args:    "[run] <rule> | [run] --prompt | [run] --output",
 	summary: "Print the evidence recorded for a rule",
 	details: `
-Prints what harness recorded for a rule when it checked it: file contents,
+Prints what assay recorded for a rule when it checked it: file contents,
 diffs, and command output, exactly as they were at that attempt. Later changes to the
 project don't change recorded evidence. Without a run ID, uses the most
 recent run; without --attempt, the latest attempt.
@@ -23,12 +23,12 @@ recent run; without --attempt, the latest attempt.
 Each item is printed under a header line. With --item, only that item's
 content is printed, with no header, so it can be piped or saved.
 
-For runs made by "harness work", --prompt prints what the worker was told
+For runs made by "assay work", --prompt prints what the worker was told
 in an attempt and --output what it printed.
 
 Flags:
   --attempt <n>     Use attempt n
-  --item <n>        Print only item n (numbered as in "harness show --evidence")
+  --item <n>        Print only item n (numbered as in "assay show --evidence")
   --prompt          Print the worker's prompt for the attempt (work runs)
   --output          Print the worker's output for the attempt (work runs)
   --json            Print one JSON object instead of text
@@ -69,11 +69,11 @@ func runEvidence(e Env, cmd *command, args []string) int {
 	case 2:
 		prefix, ruleID = positional[0], positional[1]
 	default:
-		fmt.Fprintln(e.Stderr, "harness evidence: name a rule, optionally after a run ID")
+		fmt.Fprintln(e.Stderr, "assay evidence: name a rule, optionally after a run ID")
 		return ExitUsage
 	}
 	if *attemptNumber < 0 || *itemNumber < 0 {
-		fmt.Fprintln(e.Stderr, "harness evidence: --attempt and --item must be positive numbers")
+		fmt.Fprintln(e.Stderr, "assay evidence: --attempt and --item must be positive numbers")
 		return ExitUsage
 	}
 	s, code := openProject(e, cmd, *projectDir)
@@ -87,13 +87,13 @@ func runEvidence(e Env, cmd *command, args []string) int {
 		return code
 	}
 	if len(run.Attempts) == 0 {
-		fmt.Fprintf(e.Stderr, "harness evidence: run %s has no attempts yet\n", shortID(run.ID))
+		fmt.Fprintf(e.Stderr, "assay evidence: run %s has no attempts yet\n", shortID(run.ID))
 		return ExitUsage
 	}
 	attempt := run.Attempts[len(run.Attempts)-1]
 	if *attemptNumber > 0 {
 		if *attemptNumber > len(run.Attempts) {
-			fmt.Fprintf(e.Stderr, "harness evidence: run %s has %s\n", shortID(run.ID), plural(len(run.Attempts), "attempt"))
+			fmt.Fprintf(e.Stderr, "assay evidence: run %s has %s\n", shortID(run.ID), plural(len(run.Attempts), "attempt"))
 			return ExitUsage
 		}
 		attempt = run.Attempts[*attemptNumber-1]
@@ -105,14 +105,14 @@ func runEvidence(e Env, cmd *command, args []string) int {
 		}
 	}
 	if result == nil {
-		fmt.Fprintf(e.Stderr, "harness evidence: %s@%d has no rule %q\n", run.ContractID, run.Version, ruleID)
+		fmt.Fprintf(e.Stderr, "assay evidence: %s@%d has no rule %q\n", run.ContractID, run.Version, ruleID)
 		return ExitUsage
 	}
 	items := result.Evidence
 	first := 1
 	if *itemNumber > 0 {
 		if *itemNumber > len(items) {
-			fmt.Fprintf(e.Stderr, "harness evidence: rule %s has %s in attempt %d\n", ruleID, plural(len(items), "evidence item"), attempt.Number)
+			fmt.Fprintf(e.Stderr, "assay evidence: rule %s has %s in attempt %d\n", ruleID, plural(len(items), "evidence item"), attempt.Number)
 			return ExitUsage
 		}
 		items, first = items[*itemNumber-1:*itemNumber], *itemNumber
@@ -122,7 +122,7 @@ func runEvidence(e Env, cmd *command, args []string) int {
 		if result.Status == backend.Blocked {
 			reason = "it was blocked, so it wasn't checked"
 		}
-		fmt.Fprintf(e.Stderr, "harness evidence: no evidence for rule %s in attempt %d: %s\n", ruleID, attempt.Number, reason)
+		fmt.Fprintf(e.Stderr, "assay evidence: no evidence for rule %s in attempt %d: %s\n", ruleID, attempt.Number, reason)
 		return ExitNegative
 	}
 
@@ -142,7 +142,7 @@ func runEvidence(e Env, cmd *command, args []string) int {
 		default:
 			content, err := s.service.GetEvidence(item.Blob)
 			if err != nil {
-				fmt.Fprintf(e.Stderr, "harness evidence: read item %d: %v\n", first+i, err)
+				fmt.Fprintf(e.Stderr, "assay evidence: read item %d: %v\n", first+i, err)
 				worse(ExitOperational)
 				continue
 			}
@@ -179,7 +179,7 @@ func runEvidence(e Env, cmd *command, args []string) int {
 			}
 			fmt.Fprintf(e.Stdout, "==> [%d] %s <==\n", first+i, describeEvidence(item))
 		} else if contents[i] == nil {
-			fmt.Fprintf(e.Stderr, "harness evidence: %s\n", describeEvidence(item))
+			fmt.Fprintf(e.Stderr, "assay evidence: %s\n", describeEvidence(item))
 		}
 		if contents[i] != nil {
 			e.Stdout.Write(contents[i])
@@ -194,15 +194,15 @@ func runEvidence(e Env, cmd *command, args []string) int {
 // printWorkerLog prints a work run attempt's worker prompt or output.
 func printWorkerLog(e Env, cmd *command, projectDir string, positional []string, attemptNumber int, prompt, workerOutput bool) int {
 	if prompt && workerOutput {
-		fmt.Fprintln(e.Stderr, "harness evidence: use --prompt or --output, not both")
+		fmt.Fprintln(e.Stderr, "assay evidence: use --prompt or --output, not both")
 		return ExitUsage
 	}
 	if len(positional) > 1 {
-		fmt.Fprintln(e.Stderr, "harness evidence: with --prompt or --output, name at most a run")
+		fmt.Fprintln(e.Stderr, "assay evidence: with --prompt or --output, name at most a run")
 		return ExitUsage
 	}
 	if attemptNumber < 0 {
-		fmt.Fprintln(e.Stderr, "harness evidence: --attempt must be a positive number")
+		fmt.Fprintln(e.Stderr, "assay evidence: --attempt must be a positive number")
 		return ExitUsage
 	}
 	s, code := openProject(e, cmd, projectDir)
@@ -219,19 +219,19 @@ func printWorkerLog(e Env, cmd *command, projectDir string, positional []string,
 		return code
 	}
 	if run.Work == nil || len(run.Attempts) == 0 {
-		fmt.Fprintf(e.Stderr, "harness evidence: run %s wasn't made by \"harness work\", so it has no worker to show\n", shortID(run.ID))
+		fmt.Fprintf(e.Stderr, "assay evidence: run %s wasn't made by \"assay work\", so it has no worker to show\n", shortID(run.ID))
 		return ExitUsage
 	}
 	attempt := run.Attempts[len(run.Attempts)-1]
 	if attemptNumber > 0 {
 		if attemptNumber > len(run.Attempts) {
-			fmt.Fprintf(e.Stderr, "harness evidence: run %s has %s\n", shortID(run.ID), plural(len(run.Attempts), "attempt"))
+			fmt.Fprintf(e.Stderr, "assay evidence: run %s has %s\n", shortID(run.ID), plural(len(run.Attempts), "attempt"))
 			return ExitUsage
 		}
 		attempt = run.Attempts[attemptNumber-1]
 	}
 	if attempt.Worker == nil {
-		fmt.Fprintf(e.Stderr, "harness evidence: attempt %d has no worker record\n", attempt.Number)
+		fmt.Fprintf(e.Stderr, "assay evidence: attempt %d has no worker record\n", attempt.Number)
 		return ExitOperational
 	}
 	item := attempt.Worker.Output
@@ -240,12 +240,12 @@ func printWorkerLog(e Env, cmd *command, projectDir string, positional []string,
 	}
 	content, err := s.service.GetEvidence(item.Blob)
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness evidence: %v\n", err)
+		fmt.Fprintf(e.Stderr, "assay evidence: %v\n", err)
 		return ExitOperational
 	}
 	e.Stdout.Write(content)
 	if item.Truncated {
-		fmt.Fprintf(e.Stderr, "harness evidence: only the first %s of %s were kept\n", formatSize(backend.MaxEvidenceBytes), formatSize(item.Size))
+		fmt.Fprintf(e.Stderr, "assay evidence: only the first %s of %s were kept\n", formatSize(backend.MaxEvidenceBytes), formatSize(item.Size))
 	}
 	return ExitOK
 }

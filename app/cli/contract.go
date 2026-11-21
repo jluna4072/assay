@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"harness/backend"
-	"harness/contractfile"
-	"harness/project"
+	"assay/backend"
+	"assay/contractfile"
+	"assay/project"
 )
 
 var publishCommand = command{
@@ -87,7 +87,7 @@ func runPublish(e Env, cmd *command, args []string) int {
 		return code
 	}
 	if len(files) != 1 {
-		fmt.Fprintln(e.Stderr, "harness contract publish: name exactly one contract file")
+		fmt.Fprintln(e.Stderr, "assay contract publish: name exactly one contract file")
 		return ExitUsage
 	}
 	path := files[0]
@@ -100,13 +100,13 @@ func runPublish(e Env, cmd *command, args []string) int {
 
 	result, err := contractfile.Check(resolve(e, path))
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness contract publish: %v\n", err)
+		fmt.Fprintf(e.Stderr, "assay contract publish: %v\n", err)
 		return ExitOperational
 	}
 	if result.Valid() {
 		config, err := project.LoadConfig(s.project.Root)
 		if err != nil {
-			fmt.Fprintf(e.Stderr, "harness contract publish: %v\n", err)
+			fmt.Fprintf(e.Stderr, "assay contract publish: %v\n", err)
 			return ExitOperational
 		}
 		result.AddValidation(errors.Join(backend.ValidateCommands(result.Contract, config), backend.ValidateReviewers(result.Contract, config)))
@@ -121,13 +121,13 @@ func runPublish(e Env, cmd *command, args []string) int {
 		return ExitNegative
 	}
 	if !e.Interactive && !*yes {
-		fmt.Fprintln(e.Stderr, "harness contract publish: publishing needs confirmation. Run it in a terminal, or pass --yes.")
+		fmt.Fprintln(e.Stderr, "assay contract publish: publishing needs confirmation. Run it in a terminal, or pass --yes.")
 		return ExitUsage
 	}
 
 	published, changed, err := s.service.PublishContent(result.Contract)
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness contract publish: %v\n", err)
+		fmt.Fprintf(e.Stderr, "assay contract publish: %v\n", err)
 		return ExitOperational
 	}
 	if *asJSON {
@@ -162,7 +162,7 @@ func runVersions(e Env, cmd *command, args []string) int {
 		return code
 	}
 	if len(ids) != 1 {
-		fmt.Fprintln(e.Stderr, "harness contract versions: name exactly one contract ID")
+		fmt.Fprintln(e.Stderr, "assay contract versions: name exactly one contract ID")
 		return ExitUsage
 	}
 	s, code := openProject(e, cmd, *projectDir)
@@ -173,11 +173,11 @@ func runVersions(e Env, cmd *command, args []string) int {
 
 	versions, err := s.service.ListVersions(ids[0])
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness contract versions: %v\n", err)
+		fmt.Fprintf(e.Stderr, "assay contract versions: %v\n", err)
 		return ExitOperational
 	}
 	if len(versions) == 0 {
-		fmt.Fprintf(e.Stderr, "harness contract versions: no published contract %q\n", ids[0])
+		fmt.Fprintf(e.Stderr, "assay contract versions: no published contract %q\n", ids[0])
 		return ExitUsage
 	}
 	if *asJSON {
@@ -215,12 +215,12 @@ func runShow(e Env, cmd *command, args []string) int {
 		return code
 	}
 	if len(refs) != 1 {
-		fmt.Fprintln(e.Stderr, "harness contract show: name exactly one contract, like docs or docs@2")
+		fmt.Fprintln(e.Stderr, "assay contract show: name exactly one contract, like docs or docs@2")
 		return ExitUsage
 	}
 	id, version, err := parseRef(refs[0])
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness contract show: %v\n", err)
+		fmt.Fprintf(e.Stderr, "assay contract show: %v\n", err)
 		return ExitUsage
 	}
 	s, code := openProject(e, cmd, *projectDir)
@@ -245,7 +245,7 @@ func runShow(e Env, cmd *command, args []string) int {
 	}
 	data, err := contractfile.Marshal(published.Contract)
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness contract show: %v\n", err)
+		fmt.Fprintf(e.Stderr, "assay contract show: %v\n", err)
 		return ExitOperational
 	}
 	fmt.Fprintf(e.Stdout, "# %s@%d, published %s\n", id, published.Version, published.PublishedAt.Local().Format("2006-01-02 15:04"))
@@ -275,11 +275,11 @@ func parseRef(ref string) (string, int, error) {
 func lookupVersion(e Env, cmd *command, s *session, id string, version int) (backend.PublishedContract, bool, int) {
 	versions, err := s.service.ListVersions(id)
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)
+		fmt.Fprintf(e.Stderr, "assay %s: %v\n", cmd.name, err)
 		return backend.PublishedContract{}, false, ExitOperational
 	}
 	if len(versions) == 0 {
-		fmt.Fprintf(e.Stderr, "harness %s: no published contract %q\n", cmd.name, id)
+		fmt.Fprintf(e.Stderr, "assay %s: no published contract %q\n", cmd.name, id)
 		return backend.PublishedContract{}, false, ExitUsage
 	}
 	if version == 0 {
@@ -287,11 +287,11 @@ func lookupVersion(e Env, cmd *command, s *session, id string, version int) (bac
 	}
 	published, err := s.service.GetVersion(id, version)
 	if errors.Is(err, backend.ErrNotFound) {
-		fmt.Fprintf(e.Stderr, "harness %s: %s has no version %d (latest is %d)\n", cmd.name, id, version, len(versions))
+		fmt.Fprintf(e.Stderr, "assay %s: %s has no version %d (latest is %d)\n", cmd.name, id, version, len(versions))
 		return backend.PublishedContract{}, false, ExitUsage
 	}
 	if err != nil {
-		fmt.Fprintf(e.Stderr, "harness %s: %v\n", cmd.name, err)
+		fmt.Fprintf(e.Stderr, "assay %s: %v\n", cmd.name, err)
 		return backend.PublishedContract{}, false, ExitOperational
 	}
 	return published, version == len(versions), ExitOK

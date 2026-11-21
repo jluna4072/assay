@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"harness/backend"
+	"assay/backend"
 
 	_ "modernc.org/sqlite"
 )
@@ -124,7 +124,7 @@ func TestDiffEvidenceIncludesUntrackedFiles(t *testing.T) {
 	project := gitRepo(t)
 	os.WriteFile(filepath.Join(project, "README.md"), []byte("one\n"), 0644)
 	os.WriteFile(filepath.Join(project, "old.txt"), []byte("old\n"), 0644)
-	os.WriteFile(filepath.Join(project, ".gitignore"), []byte(".harness/\nignored.txt\n"), 0644)
+	os.WriteFile(filepath.Join(project, ".gitignore"), []byte(".assay/\nignored.txt\n"), 0644)
 	commitAll(t, project)
 	publish(t, s, evidenceContract(
 		backend.EvidenceSpec{Kind: backend.DiffEvidence},
@@ -155,7 +155,7 @@ func TestDiffEvidenceIncludesUntrackedFiles(t *testing.T) {
 			t.Errorf("diff lacks %q:\n%s", want, content)
 		}
 	}
-	if strings.Contains(string(content), "ignored.txt") || strings.Contains(string(content), ".harness") {
+	if strings.Contains(string(content), "ignored.txt") || strings.Contains(string(content), ".assay") {
 		t.Errorf("diff includes ignored files:\n%s", content)
 	}
 	if docs.Files != 1 {
@@ -166,19 +166,19 @@ func TestDiffEvidenceIncludesUntrackedFiles(t *testing.T) {
 	if strings.TrimSpace(string(staged)) != "README.md" {
 		t.Errorf("project index changed: %q", staged)
 	}
-	if entries, _ := os.ReadDir(filepath.Join(project, ".harness", "tmp")); len(entries) != 0 {
+	if entries, _ := os.ReadDir(filepath.Join(project, ".assay", "tmp")); len(entries) != 0 {
 		t.Errorf("temporary index left behind: %v", entries)
 	}
 }
 
 func TestDiffEvidenceEdgeCases(t *testing.T) {
 	_, s := openTest(t)
-	project := gitRepo(t) // no .gitignore: harness's own state must still be left out
+	project := gitRepo(t) // no .gitignore: assay's own state must still be left out
 	os.MkdirAll(filepath.Join(project, "gone"), 0755)
 	os.WriteFile(filepath.Join(project, "gone", "a.txt"), []byte("a\n"), 0644)
 	commitAll(t, project)
-	os.MkdirAll(filepath.Join(project, ".harness"), 0700)
-	os.WriteFile(filepath.Join(project, ".harness", "harness.db"), []byte("state"), 0600)
+	os.MkdirAll(filepath.Join(project, ".assay"), 0700)
+	os.WriteFile(filepath.Join(project, ".assay", "assay.db"), []byte("state"), 0600)
 	publish(t, s, evidenceContract(
 		backend.EvidenceSpec{Kind: backend.DiffEvidence},
 		backend.EvidenceSpec{Kind: backend.DiffEvidence, Paths: []string{"not-created-yet"}},
@@ -193,7 +193,7 @@ func TestDiffEvidenceEdgeCases(t *testing.T) {
 	}
 	items := run.Attempts[0].Results[0].Evidence
 	whole, _ := s.GetEvidence(items[0].Blob)
-	if items[0].Error != "" || strings.Contains(string(whole), ".harness") || !strings.Contains(string(whole), "README.md") {
+	if items[0].Error != "" || strings.Contains(string(whole), ".assay") || !strings.Contains(string(whole), "README.md") {
 		t.Errorf("whole diff (%+v):\n%s", items[0], whole)
 	}
 	if items[1].Error != "" || items[1].Files != 0 || items[1].Size != 0 {
@@ -286,7 +286,7 @@ PRAGMA user_version = 1;`)
 	newer, _ := sql.Open("sqlite", path)
 	newer.Exec("PRAGMA user_version = 99")
 	newer.Close()
-	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "upgrade harness") {
+	if _, err := Open(path); err == nil || !strings.Contains(err.Error(), "upgrade assay") {
 		t.Fatalf("newer schema: %v", err)
 	}
 }

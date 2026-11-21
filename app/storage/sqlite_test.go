@@ -1,8 +1,8 @@
 package storage
 
 import (
+	"assay/backend"
 	"errors"
-	"harness/backend"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -18,7 +18,7 @@ func contract() backend.Contract {
 }
 func openTest(t *testing.T) (*SQLite, *backend.Service) {
 	t.Helper()
-	store, err := Open(filepath.Join(t.TempDir(), "harness.db"))
+	store, err := Open(filepath.Join(t.TempDir(), "assay.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +38,7 @@ func publish(t *testing.T, s *backend.Service, c backend.Contract) backend.Publi
 }
 
 func TestFailedThenPassedAttemptSurvivesReopen(t *testing.T) {
-	dbPath := filepath.Join(t.TempDir(), "data", "harness.db")
+	dbPath := filepath.Join(t.TempDir(), "data", "assay.db")
 	store, err := Open(dbPath)
 	if err != nil {
 		t.Fatal(err)

@@ -1,4 +1,4 @@
-// Package cli implements the harness command line. Commands are thin callers
+// Package cli implements the assay command line. Commands are thin callers
 // of the backend; this package owns argument parsing, output, and exit codes.
 package cli
 
@@ -28,7 +28,7 @@ const (
 // JSONSchema versions the --json output shape.
 const JSONSchema = 1
 
-// Version is set at release time with -ldflags "-X harness/cli.Version=v0.1.0".
+// Version is set at release time with -ldflags "-X assay/cli.Version=v0.1.0".
 var Version = "dev"
 
 // Env is what a command runs against. DefaultEnv describes the real process;
@@ -96,19 +96,19 @@ var commands = []command{
 	reviewerLogoutCommand,
 }
 
-const overview = `harness checks agent work against contracts you publish.
+const overview = `assay checks agent work against contracts you publish.
 
 Usage:
-  harness <command> [arguments]
+  assay <command> [arguments]
 
 Commands:
 %s
 Flags:
-  -h, --help   Show help for harness or a command
-  --version    Print the harness version
+  -h, --help   Show help for assay or a command
+  --version    Print the assay version
 
 Exit codes: 0 success, 1 failed or invalid, 2 operational error, 64 usage error.
-Run "harness <command> --help" for details on a command.
+Run "assay <command> --help" for details on a command.
 `
 
 // Run executes the command line in args (without the program name) and
@@ -124,7 +124,7 @@ func Run(args []string, e Env) int {
 		printOverview(stdout)
 		return ExitOK
 	case "--version", "-version", "version":
-		fmt.Fprintln(stdout, "harness", version())
+		fmt.Fprintln(stdout, "assay", version())
 		return ExitOK
 	case "help":
 		if len(args) == 1 {
@@ -183,10 +183,10 @@ func unknown(e Env, args []string) int {
 		if len(args) > 1 && (args[1] == "-h" || args[1] == "--help" || args[1] == "-help") {
 			w, code = e.Stdout, ExitOK
 		}
-		fmt.Fprintf(w, "Usage:\n  harness %s <command> [arguments]\n\nCommands:\n%s", args[0], commandList(group))
+		fmt.Fprintf(w, "Usage:\n  assay %s <command> [arguments]\n\nCommands:\n%s", args[0], commandList(group))
 		return code
 	}
-	fmt.Fprintf(e.Stderr, "harness: unknown command %q\nRun \"harness --help\" for usage.\n", strings.Join(args, " "))
+	fmt.Fprintf(e.Stderr, "assay: unknown command %q\nRun \"assay --help\" for usage.\n", strings.Join(args, " "))
 	return ExitUsage
 }
 
@@ -205,7 +205,7 @@ func commandList(list []command) string {
 }
 
 func printCommandHelp(w io.Writer, cmd *command) {
-	fmt.Fprintf(w, "Usage:\n  harness %s %s\n\n%s\n", cmd.name, cmd.args, strings.TrimSpace(cmd.details))
+	fmt.Fprintf(w, "Usage:\n  assay %s %s\n\n%s\n", cmd.name, cmd.args, strings.TrimSpace(cmd.details))
 }
 
 // parseFlags parses flags that may appear before, between, or after
@@ -220,7 +220,7 @@ func parseFlags(e Env, cmd *command, fs *flag.FlagSet, args []string) ([]string,
 			return nil, ExitOK, false
 		}
 		if err != nil {
-			fmt.Fprintf(e.Stderr, "harness %s: %v\nRun \"harness %s --help\" for usage.\n", cmd.name, err, cmd.name)
+			fmt.Fprintf(e.Stderr, "assay %s: %v\nRun \"assay %s --help\" for usage.\n", cmd.name, err, cmd.name)
 			return nil, ExitUsage, false
 		}
 		rest := fs.Args()

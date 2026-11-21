@@ -1,4 +1,4 @@
-harness/release.yaml (Release readiness, unpublished)
+assay/release.yaml (Release readiness, unpublished)
 notes — Release notes say "ready"
 ├── guide — Guide exists
 │   └── readme — Project has a README

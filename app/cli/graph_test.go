@@ -19,8 +19,8 @@ func releaseProject(t *testing.T) (dir, run string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	os.WriteFile(filepath.Join(dir, "harness", "release.yaml"), data, 0644)
-	mustRun(t, dir, "contract", "publish", "harness/release.yaml", "--yes")
+	os.WriteFile(filepath.Join(dir, "assay", "release.yaml"), data, 0644)
+	mustRun(t, dir, "contract", "publish", "assay/release.yaml", "--yes")
 	os.WriteFile(filepath.Join(dir, "README.md"), nil, 0644)
 	stdout, _, _ := runIn(dir, false, "check", "release", "--json")
 	var checked struct {
@@ -40,7 +40,7 @@ func TestGraphFormats(t *testing.T) {
 		golden string
 		args   []string
 	}{
-		{"graph-file.txt", []string{"contract", "graph", "harness/release.yaml"}},
+		{"graph-file.txt", []string{"contract", "graph", "assay/release.yaml"}},
 		{"graph.txt", []string{"contract", "graph", "release"}},
 		{"graph-run.txt", []string{"contract", "graph", "release", "--run", run}},
 		{"graph.mmd", []string{"contract", "graph", "release@1", "--format", "mermaid"}},
@@ -85,8 +85,8 @@ alone — Alone
 
 func TestGraphErrors(t *testing.T) {
 	dir, run := releaseProject(t)
-	os.WriteFile(filepath.Join(dir, "harness", "other.yaml"), []byte(strings.ReplaceAll(docsContract, "docs", "other")), 0644)
-	mustRun(t, dir, "contract", "publish", "harness/other.yaml", "--yes")
+	os.WriteFile(filepath.Join(dir, "assay", "other.yaml"), []byte(strings.ReplaceAll(docsContract, "docs", "other")), 0644)
+	mustRun(t, dir, "contract", "publish", "assay/other.yaml", "--yes")
 	os.WriteFile(filepath.Join(dir, "bad.yaml"), []byte("id: x\n"), 0644)
 
 	stdout, _, code := runIn(dir, false, "contract", "graph", "bad.yaml")
@@ -101,7 +101,7 @@ func TestGraphErrors(t *testing.T) {
 		{[]string{"contract", "graph"}, ExitUsage, "exactly one contract"},
 		{[]string{"contract", "graph", "release", "--format", "svg"}, ExitUsage, `unknown format "svg"`},
 		{[]string{"contract", "graph", "release", "--format", "dot", "--json"}, ExitUsage, "can't be combined"},
-		{[]string{"contract", "graph", "harness/release.yaml", "--run", run}, ExitUsage, "needs a published contract"},
+		{[]string{"contract", "graph", "assay/release.yaml", "--run", run}, ExitUsage, "needs a published contract"},
 		{[]string{"contract", "graph", "other", "--run", run}, ExitUsage, "checks release@1, not other"},
 		{[]string{"contract", "graph", "release@2", "--run", run}, ExitUsage, "checks release@1, not release@2"},
 		{[]string{"contract", "graph", "nope"}, ExitUsage, `no published contract "nope"`},

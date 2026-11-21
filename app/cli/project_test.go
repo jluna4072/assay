@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"harness/contractfile"
+	"assay/contractfile"
 )
 
-// runIn runs harness in dir. interactive simulates a person at a terminal.
+// runIn runs assay in dir. interactive simulates a person at a terminal.
 func runIn(dir string, interactive bool, args ...string) (stdout, stderr string, code int) {
 	var out, errOut bytes.Buffer
 	code = Run(args, Env{Stdout: &out, Stderr: &errOut, Dir: dir, Interactive: interactive})
@@ -22,7 +22,7 @@ func mustRun(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	stdout, stderr, code := runIn(dir, false, args...)
 	if code != ExitOK {
-		t.Fatalf("harness %s: exit %d\n%s%s", strings.Join(args, " "), code, stdout, stderr)
+		t.Fatalf("assay %s: exit %d\n%s%s", strings.Join(args, " "), code, stdout, stderr)
 	}
 	return stdout
 }
@@ -33,25 +33,25 @@ func TestInitIsIdempotentAndIgnoresState(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, ".gitignore"), []byte("node_modules"), 0644)
 
 	out := mustRun(t, dir, "init")
-	for _, want := range []string{"created  .harness/harness.db", "created  .harness/config.yaml", "created  harness/example.yaml", "added    /.harness/ to .gitignore", "Next: harness contract validate harness/example.yaml"} {
+	for _, want := range []string{"created  .assay/assay.db", "created  .assay/config.yaml", "created  assay/example.yaml", "added    /.assay/ to .gitignore", "Next: assay contract validate assay/example.yaml"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("first init output lacks %q:\n%s", want, out)
 		}
 	}
 	ignore, _ := os.ReadFile(filepath.Join(dir, ".gitignore"))
-	if string(ignore) != "node_modules\n/.harness/\n" {
+	if string(ignore) != "node_modules\n/.assay/\n" {
 		t.Errorf(".gitignore: %q", ignore)
 	}
-	if result, err := contractfile.Check(filepath.Join(dir, "harness", "example.yaml")); err != nil || !result.Valid() {
+	if result, err := contractfile.Check(filepath.Join(dir, "assay", "example.yaml")); err != nil || !result.Valid() {
 		t.Errorf("example contract is not valid: %v %v", err, result.Problems)
 	}
 
-	os.WriteFile(filepath.Join(dir, "harness", "example.yaml"), []byte("edited"), 0644)
+	os.WriteFile(filepath.Join(dir, "assay", "example.yaml"), []byte("edited"), 0644)
 	out = mustRun(t, dir, "init")
 	if !strings.Contains(out, "already initialized") || strings.Contains(out, "created") || strings.Contains(out, "added") {
 		t.Errorf("second init changed something:\n%s", out)
 	}
-	if data, _ := os.ReadFile(filepath.Join(dir, "harness", "example.yaml")); string(data) != "edited" {
+	if data, _ := os.ReadFile(filepath.Join(dir, "assay", "example.yaml")); string(data) != "edited" {
 		t.Error("second init overwrote a contract file")
 	}
 	if ignore2, _ := os.ReadFile(filepath.Join(dir, ".gitignore")); !bytes.Equal(ignore, ignore2) {
@@ -61,21 +61,21 @@ func TestInitIsIdempotentAndIgnoresState(t *testing.T) {
 
 func TestInitOutsideGitAndWithExistingContracts(t *testing.T) {
 	dir := t.TempDir()
-	os.Mkdir(filepath.Join(dir, "harness"), 0755)
-	os.WriteFile(filepath.Join(dir, "harness", "docs.yaml"), []byte("id: docs\n"), 0644)
+	os.Mkdir(filepath.Join(dir, "assay"), 0755)
+	os.WriteFile(filepath.Join(dir, "assay", "docs.yaml"), []byte("id: docs\n"), 0644)
 
 	stdout, _, code := runIn(dir, false, "init", "--json")
 	var got initJSON
 	if err := json.Unmarshal([]byte(stdout), &got); err != nil || code != ExitOK {
 		t.Fatalf("exit %d: %v\n%s", code, err, stdout)
 	}
-	if got.Gitignore != "not a git repository" || len(got.Created) != 2 || got.Created[1] != ".harness/config.yaml" || got.Existing[0] != "harness/" {
+	if got.Gitignore != "not a git repository" || len(got.Created) != 2 || got.Created[1] != ".assay/config.yaml" || got.Existing[0] != "assay/" {
 		t.Fatalf("unexpected: %+v", got)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".gitignore")); !os.IsNotExist(err) {
 		t.Error(".gitignore created outside a git repository")
 	}
-	if _, err := os.Stat(filepath.Join(dir, "harness", "example.yaml")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(dir, "assay", "example.yaml")); !os.IsNotExist(err) {
 		t.Error("example written next to existing contracts")
 	}
 }
@@ -83,7 +83,7 @@ func TestInitOutsideGitAndWithExistingContracts(t *testing.T) {
 func TestPublishVersionsAndShow(t *testing.T) {
 	dir := t.TempDir()
 	mustRun(t, dir, "init")
-	file := filepath.Join(dir, "harness", "example.yaml")
+	file := filepath.Join(dir, "assay", "example.yaml")
 
 	// Not at a terminal and no --yes: refused, nothing stored.
 	_, stderr, code := runIn(dir, false, "contract", "publish", file)
@@ -95,7 +95,7 @@ func TestPublishVersionsAndShow(t *testing.T) {
 	}
 
 	// A person at a terminal publishes without --yes.
-	stdout, _, code := runIn(dir, true, "contract", "publish", "harness/example.yaml")
+	stdout, _, code := runIn(dir, true, "contract", "publish", "assay/example.yaml")
 	if code != ExitOK || stdout != "published example@1 (1 rule)\n" {
 		t.Fatalf("publish: exit %d %q", code, stdout)
 	}
@@ -148,9 +148,9 @@ func TestPublishInvalidAndProjectErrors(t *testing.T) {
 		code   int
 		stderr string
 	}{
-		{elsewhere, []string{"contract", "versions", "docs"}, ExitUsage, `Run "harness init"`},
+		{elsewhere, []string{"contract", "versions", "docs"}, ExitUsage, `Run "assay init"`},
 		{elsewhere, []string{"contract", "versions", "docs", "--project", dir}, ExitUsage, `no published contract "docs"`},
-		{dir, []string{"contract", "versions", "docs", "--project", elsewhere}, ExitUsage, "no harness project found in " + elsewhere},
+		{dir, []string{"contract", "versions", "docs", "--project", elsewhere}, ExitUsage, "no assay project found in " + elsewhere},
 		{dir, []string{"contract", "publish", filepath.Join(dir, "missing.yaml"), "--yes"}, ExitOperational, "no such file"},
 		{dir, []string{"contract", "publish", "--yes"}, ExitUsage, "exactly one contract file"},
 		{dir, []string{"contract", "show", "@2"}, ExitUsage, "missing contract ID"},
