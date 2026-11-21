@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
+
+	"assay/contractfile"
 )
 
 // The UI's actions. Each calls the backend function its command calls:
@@ -203,7 +205,11 @@ func (m *uiModel) closeConfirm() {
 // edit opens a contract file in the person's editor; the UI checks it
 // again when the editor closes.
 func (m *uiModel) edit(name string) tea.Cmd {
-	cmd := editorCommand(m.filePath(name))
+	path := m.filePath(name)
+	if contractfile.IsSuite(path) {
+		path = filepath.Join(path, contractfile.SuiteFile) // its contracts are next to it
+	}
+	cmd := editorCommand(path)
 	cmd.Dir = m.data.s.project.Root
 	return tea.ExecProcess(cmd, func(err error) tea.Msg { return uiEditedMsg{file: name, err: err} })
 }

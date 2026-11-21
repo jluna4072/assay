@@ -47,7 +47,7 @@ func init() {
 
 const mcpInstructions = `assay checks work against contracts and records the evidence for every verdict. Only assay's verdict counts: work is done when check (or recheck) reports every rule passed, not before.
 
-Contracts are YAML files in the project's assay/ directory (see get_contract for the format of an existing one). To add or change one, write the file, run validate_contract until it has no problems, then show the person diff_contract and ask them to publish it ("assay contract publish <file>", or p in the assay UI). You can't publish.
+Contracts are YAML files in the project's assay/ directory (see get_contract for the format of an existing one). A suite, in assay/suites/<id>/, groups contract files under a suite.yaml and is validated, published, and checked as one contract whose rules are named <contract>/<rule>. To add or change one, write the file, run validate_contract until it has no problems, then show the person diff_contract and ask them to publish it ("assay contract publish <file>", or p in the assay UI). You can't publish.
 
 get_contract shows what each rule requires: its criterion, its check, the rules it depends on, and the evidence it records. Read it before working toward a contract.
 
@@ -213,7 +213,7 @@ func newMCPServer(root string) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "validate_contract",
-		Description: "Validate a contract file without publishing it. Reports every problem with its line: unknown keys, missing fields, unknown dependencies or cycles, commands not approved in .assay/config.yaml, and unknown reviewers.",
+		Description: "Validate a contract file, or a suite folder (a suite.yaml and the contract files it groups), without publishing it. Reports every problem with its line: unknown keys, missing fields, unknown dependencies or cycles, commands not approved in .assay/config.yaml, and unknown reviewers.",
 		Annotations: readOnly,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in contractFile) (*mcp.CallToolResult, any, error) {
 		path, err := t.inProject(in.Path)

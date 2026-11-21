@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"assay/backend"
+	"assay/contractfile"
 	"assay/project"
 	"assay/storage"
 )
@@ -229,7 +230,8 @@ func runInit(e Env, cmd *command, args []string) int {
 	return ExitOK
 }
 
-// contractFiles lists YAML files directly inside dir; a missing dir is empty.
+// contractFiles lists YAML files directly inside dir, then the suites in
+// its suites/ folder as suites/<name>; a missing dir is empty.
 func contractFiles(dir string) ([]string, error) {
 	entries, err := os.ReadDir(dir)
 	if errors.Is(err, os.ErrNotExist) {
@@ -243,6 +245,15 @@ func contractFiles(dir string) ([]string, error) {
 		name := entry.Name()
 		if !entry.IsDir() && (strings.HasSuffix(name, ".yaml") || strings.HasSuffix(name, ".yml")) {
 			files = append(files, name)
+		}
+	}
+	suites, err := os.ReadDir(filepath.Join(dir, suitesDir))
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	for _, entry := range suites {
+		if entry.IsDir() && contractfile.IsSuite(filepath.Join(dir, suitesDir, entry.Name())) {
+			files = append(files, suitesDir+"/"+entry.Name())
 		}
 	}
 	return files, nil

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -56,6 +57,7 @@ type fileDiff struct {
 // Problem is one reason a contract file is invalid. Line and Column are
 // 1-based and zero when unknown.
 type Problem struct {
+	File    string `json:"file,omitempty"` // in a suite: the file in its folder
 	Line    int    `json:"line,omitempty"`
 	Column  int    `json:"column,omitempty"`
 	RuleID  string `json:"rule,omitempty"`
@@ -76,11 +78,24 @@ func (p Problem) String() string {
 	return location + p.Message
 }
 
-// Result is a parsed and validated contract file.
+// In names the problem's place, path:line:column: message, where path is
+// the contract file, or the suite folder the problem's file is in.
+func (p Problem) In(path string) string {
+	if p.File != "" {
+		path = filepath.Join(path, p.File)
+	}
+	return path + ":" + p.String()
+}
+
+// Result is a parsed and validated contract file or suite.
 type Result struct {
 	Path     string
 	Contract backend.Contract
 	Problems []Problem
+	// Members lists a suite's contracts; it is empty for a contract file.
+	Members []string
+
+	suite *suiteInfo
 
 	root        *yaml.Node   // for locating later validation problems
 	decodeLines map[int]bool // lines that already have a decoding problem
@@ -97,7 +112,7 @@ type InvalidError struct {
 func (e *InvalidError) Error() string {
 	lines := make([]string, len(e.Problems))
 	for i, p := range e.Problems {
-		lines[i] = e.Path + ":" + p.String()
+		lines[i] = p.In(e.Path)
 	}
 	return strings.Join(lines, "\n")
 }
@@ -114,9 +129,13 @@ func Load(path string) (backend.Contract, error) {
 	return result.Contract, nil
 }
 
-// Check reads, decodes, and validates a contract file. The error is non-nil
-// only when the file can't be read; contract problems are in the Result.
+// Check reads, decodes, and validates a contract file, or a suite folder.
+// The error is non-nil only when the file can't be read; contract problems
+// are in the Result.
 func Check(path string) (Result, error) {
+	if info, err := os.Stat(path); err == nil && info.IsDir() || filepath.Base(path) == SuiteFile {
+		return CheckSuite(path)
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Result{Path: path}, err
@@ -215,6 +234,12 @@ func Parse(data []byte) Result {
 // backend.ValidateCommands) to the result, located in the file.
 func (r *Result) AddValidation(err error) {
 	for _, v := range backend.ValidationErrors(err) {
+		if r.suite != nil {
+			if p, ok := r.suite.problem(v); ok {
+				r.Problems = append(r.Problems, p)
+			}
+			continue
+		}
 		line, column := position(r.root, v.Rule, v.Field)
 		if r.decodeLines[line] {
 			continue
@@ -226,7 +251,11 @@ func (r *Result) AddValidation(err error) {
 
 func sorted(result Result) Result {
 	sort.SliceStable(result.Problems, func(i, j int) bool {
-		return result.Problems[i].Line < result.Problems[j].Line
+		a, b := result.Problems[i], result.Problems[j]
+		if a.File != b.File {
+			return a.File < b.File
+		}
+		return a.Line < b.Line
 	})
 	return result
 }
