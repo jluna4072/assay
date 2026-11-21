@@ -1,0 +1,24 @@
+assay  Contracts  Runs  ›  run SHORT › guide · attempt 2
+────────────────────────────────────────────────────────────────────────────────
+  Keys
+
+  ↑ ↓  k j    move between items
+  enter → l   open the selected item
+  esc ← h     go back
+  pgup pgdn   scroll a page
+  home end    jump to the top or bottom
+  tab, 1 2    switch between Contracts and Runs
+  r           reload from the database
+  ?           show or hide this help
+  q           go back, or quit from a list
+  ctrl+c      quit
+
+  The UI only shows what assay has recorded. To change anything, use
+  the commands: assay contract publish, assay check, assay work, …
+
+
+
+
+
+
+esc close help · ctrl+c quit

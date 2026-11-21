@@ -37,6 +37,11 @@ type Env struct {
 	Stdout, Stderr io.Writer
 	Dir            string // working directory, where project discovery starts
 	Interactive    bool   // a person is at the terminal (stdin is a TTY)
+	// Terminal is set when stdin and stdout are both terminals, so the
+	// full-screen UI can run.
+	Terminal bool
+	// ReadLine reads one line from stdin.
+	ReadLine func() (string, error)
 	// ReadSecret reads one line without echoing it when a person is at the
 	// terminal, or from stdin otherwise (for piping a key in).
 	ReadSecret func(prompt string) (string, error)
@@ -52,18 +57,23 @@ func DefaultEnv() Env {
 	}
 	// A real terminal check: /dev/null is also a character device.
 	interactive := term.IsTerminal(int(os.Stdin.Fd()))
-	return Env{Stdout: os.Stdout, Stderr: os.Stderr, Dir: dir, Interactive: interactive, ReadSecret: func(prompt string) (string, error) {
+	terminal := interactive && term.IsTerminal(int(os.Stdout.Fd()))
+	stdin := bufio.NewReader(os.Stdin)
+	readLine := func() (string, error) {
+		line, err := stdin.ReadString('\n')
+		if errors.Is(err, io.EOF) && line != "" {
+			err = nil
+		}
+		return line, err
+	}
+	return Env{Stdout: os.Stdout, Stderr: os.Stderr, Dir: dir, Interactive: interactive, Terminal: terminal, ReadLine: readLine, ReadSecret: func(prompt string) (string, error) {
 		if interactive {
 			fmt.Fprint(os.Stderr, prompt)
 			secret, err := term.ReadPassword(int(os.Stdin.Fd()))
 			fmt.Fprintln(os.Stderr)
 			return string(secret), err
 		}
-		line, err := bufio.NewReader(os.Stdin).ReadString('\n')
-		if errors.Is(err, io.EOF) && line != "" {
-			err = nil
-		}
-		return line, err
+		return readLine()
 	}}
 }
 
@@ -94,6 +104,7 @@ var commands = []command{
 	reviewerTestCommand,
 	reviewerLoginCommand,
 	reviewerLogoutCommand,
+	uiCommand,
 }
 
 const overview = `assay checks agent work against contracts you publish.
@@ -116,6 +127,9 @@ Run "assay <command> --help" for details on a command.
 func Run(args []string, e Env) int {
 	stdout, stderr := e.Stdout, e.Stderr
 	if len(args) == 0 {
+		if e.Terminal {
+			return runUI(e, &uiCommand, nil)
+		}
 		printOverview(stderr)
 		return ExitUsage
 	}
