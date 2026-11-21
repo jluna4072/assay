@@ -17,8 +17,9 @@ type SQLite struct{ db *sql.DB }
 
 // SchemaVersion is the database layout this build creates and reads.
 // Version 2 added run baselines and the evidence blob store; version 3,
-// work runs and the worker that made each attempt.
-const SchemaVersion = 3
+// work runs and the worker that made each attempt; version 4, the events
+// of work runs, so another process can follow one.
+const SchemaVersion = 4
 
 var _ backend.RunRepository = (*SQLite)(nil)
 
@@ -59,7 +60,8 @@ func Open(path string) (*SQLite, error) {
 }
 func (s *SQLite) Close() error { return s.db.Close() }
 func (s *SQLite) initialize() error {
-	if _, err := s.db.Exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;"); err != nil {
+	// WAL lets "harness show --follow" read while "harness work" writes.
+	if _, err := s.db.Exec("PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;"); err != nil {
 		return err
 	}
 	var version int
@@ -102,6 +104,9 @@ BEGIN SELECT RAISE(ABORT, 'published versions are immutable'); END;
 CREATE TRIGGER IF NOT EXISTS versions_no_delete BEFORE DELETE ON versions
 BEGIN SELECT RAISE(ABORT, 'published versions are immutable'); END;
 CREATE TABLE IF NOT EXISTS blobs (hash TEXT PRIMARY KEY, data BLOB NOT NULL);
+CREATE TABLE IF NOT EXISTS events (
+ run_id TEXT NOT NULL REFERENCES runs(id), seq INTEGER NOT NULL, payload TEXT NOT NULL,
+ PRIMARY KEY(run_id, seq));
 CREATE TRIGGER IF NOT EXISTS blobs_no_update BEFORE UPDATE ON blobs
 BEGIN SELECT RAISE(ABORT, 'evidence is immutable'); END;
 `)
@@ -413,4 +418,49 @@ func (s *SQLite) GetBlob(hash string) ([]byte, error) {
 		return nil, notFound(err)
 	}
 	return data, nil
+}
+
+// AppendEvent records a work run's event, numbering it after the run's
+// earlier events.
+func (s *SQLite) AppendEvent(runID string, event backend.Event) (int, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	var seq int
+	if err := tx.QueryRow("SELECT COALESCE(MAX(seq),0)+1 FROM events WHERE run_id=?", runID).Scan(&seq); err != nil {
+		return 0, err
+	}
+	event.Seq = seq
+	payload, err := json.Marshal(event)
+	if err != nil {
+		return 0, err
+	}
+	if _, err := tx.Exec("INSERT INTO events(run_id,seq,payload) VALUES(?,?,?)", runID, seq, string(payload)); err != nil {
+		return 0, err
+	}
+	return seq, tx.Commit()
+}
+
+// ListEvents returns a run's events after seq, in order.
+func (s *SQLite) ListEvents(runID string, after int) ([]backend.Event, error) {
+	rows, err := s.db.Query("SELECT payload FROM events WHERE run_id=? AND seq>? ORDER BY seq", runID, after)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	events := []backend.Event{}
+	for rows.Next() {
+		var payload string
+		if err := rows.Scan(&payload); err != nil {
+			return nil, err
+		}
+		var event backend.Event
+		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	return events, rows.Err()
 }
