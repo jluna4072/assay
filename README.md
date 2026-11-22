@@ -4,12 +4,16 @@ assay is a command-line tool that checks agent work against contracts and proves
 
 ## Install
 
-Install the Go version named in `app/go.mod`, then from the repository root:
+With [Homebrew](https://brew.sh), on macOS or Linux:
 
 ```sh
-cd app
-go install ./cmd/assay   # puts assay in $(go env GOPATH)/bin
+brew install jluna4072/tap/assay
+assay doctor              # checks git, the sandbox, keys, and logins, and says how to fix each
 ```
+
+After `brew tap jluna4072/tap` once, `brew install assay` and `brew upgrade assay` work too. Release archives for macOS and Linux (arm64 and amd64) are on the [releases page](https://github.com/jluna4072/assay/releases). To build from source, install the Go version named in `app/go.mod`, then run `cd app && go install ./cmd/assay`.
+
+New to assay? [Getting started](docs/getting-started.md) goes from install to a first contract, check, and work run.
 
 ## Try it
 
@@ -86,7 +90,7 @@ Backend details: [contract publication](docs/contracts.md) and [persistent runs]
 
 ## Scope
 
-Contracts can be grouped into suites, folders you keep in a library and add to any project, that pass only when every rule of every contract passes. Rules can check that a file exists, that an approved command succeeds, or that a reviewer you configure (TypeSafe's Jev, a Claude or OpenAI model, a model running locally through Ollama, or any program that speaks assay's review protocol) judges the evidence to meet a criterion, with dependencies between them. Each attempt can record file contents, git diffs, and command output as evidence, plus the exact review request and response; commands and reviewers run under the macOS sandbox. `assay work` has a worker (an agent or any program) do a task in a git worktree, checks the result, and sends back what failed until every rule passes or a limit is reached; the result is a branch you review and merge. Typing `assay` at a terminal opens a full-screen view for browsing contracts, runs, and evidence, for validating, publishing, editing, checking, and rechecking with a key, and for starting work runs and watching them, wherever they were started, as they happen. `assay mcp` lets an agent such as Claude Code list and validate contracts, check its work, and read why rules failed, without being able to publish. Releases are future work.
+Contracts can be grouped into suites, folders you keep in a library and add to any project, that pass only when every rule of every contract passes. Rules can check that a file exists, that an approved command succeeds, or that a reviewer you configure (TypeSafe's Jev, a Claude or OpenAI model, a model running locally through Ollama, or any program that speaks assay's review protocol) judges the evidence to meet a criterion, with dependencies between them. Each attempt can record file contents, git diffs, and command output as evidence, plus the exact review request and response; commands and reviewers run under the macOS sandbox. `assay work` has a worker (an agent or any program) do a task in a git worktree, checks the result, and sends back what failed until every rule passes or a limit is reached; the result is a branch you review and merge. Typing `assay` at a terminal opens a full-screen view for browsing contracts, runs, and evidence, for validating, publishing, editing, checking, and rechecking with a key, and for starting work runs and watching them, wherever they were started, as they happen. `assay mcp` lets an agent such as Claude Code list and validate contracts, check its work, and read why rules failed, without being able to publish.
 
 ## Roadmap
 

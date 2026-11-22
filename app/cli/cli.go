@@ -113,6 +113,7 @@ var commands = []command{
 	reviewerLogoutCommand,
 	uiCommand,
 	mcpCommand,
+	doctorCommand,
 }
 
 const overview = `assay checks agent work against contracts you publish.
