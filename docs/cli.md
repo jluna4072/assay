@@ -382,6 +382,32 @@ Initialized assay project in /Users/me/my-project
 Next: assay contract validate assay/example.yaml
 ```
 
+### `assay doctor`
+
+Checks that assay can run here and says how to fix anything missing. On this machine: git, and whether the command sandbox works. In the project around the current directory (or `--project`): that it's a git repository, that `.assay/config.yaml` parses, that the programs its commands, reviewers, and workers run are on `PATH`, that each API reviewer has a key (from its environment variable or the Keychain), that Codex workers are logged in (`codex login status`), and that every contract file is valid. It changes nothing and calls no model; `assay reviewer test` sends a reviewer real requests.
+
+```
+$ assay doctor
+assay v0.1.0 · darwin/arm64
+
+This machine
+  ✓ git: 2.50.1 (Apple Git-155)
+  ✓ command sandbox: sandbox-exec works
+
+Project ~/my-project
+  ✓ git repository
+  ✓ .assay/config.yaml: 1 command, 1 reviewer, 1 worker
+  ✓ command go-test: go test ./...
+  ✗ reviewer jev: no API key for api.typesafe.ai
+      fix: assay reviewer login jev (or set TYPESAFE_API_KEY)
+  ✓ worker codex: codex · Logged in using ChatGPT
+  ✓ contracts: 2 contract files, all valid
+
+1 problem to fix.
+```
+
+Exits 0 when nothing needs fixing (warnings, such as being outside a project or having the sandbox off, are allowed) and 1 when something does. `--json` prints every check with its `status` (`ok`, `warn`, or `fail`), `detail`, and `fix`.
+
 ### `assay contract publish <file>`
 
 Validates the file (or a suite folder) and stores it as the contract's next version. Published versions never change, and later runs stay tied to the version they started with. Publishing a file that matches the latest version stores nothing:

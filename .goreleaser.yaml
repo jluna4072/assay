@@ -1,0 +1,56 @@
+# Release builds of assay. See RELEASING.md.
+version: 2
+project_name: assay
+
+builds:
+  - id: assay
+    dir: app
+    main: ./cmd/assay
+    binary: assay
+    env: [CGO_ENABLED=0] # modernc SQLite is pure Go
+    goos: [darwin, linux]
+    goarch: [arm64, amd64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X assay/cli.Version=v{{ .Version }}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files: [README.md]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^Merge "]
+
+release:
+  github:
+    owner: jluna4072
+    name: assay
+
+# brew install jluna4072/tap/assay
+homebrew_casks:
+  - name: assay
+    repository:
+      owner: jluna4072
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Casks
+    homepage: https://github.com/jluna4072/assay
+    description: Check AI agent work against contracts you publish
+    commit_author:
+      name: Jacob Luna
+      email: jluna4072@users.noreply.github.com
+    commit_msg_template: "assay {{ .Tag }}"
+    # The binary isn't signed or notarized, so clear the quarantine flag
+    # Homebrew sets on cask downloads; otherwise macOS refuses to run it.
+    hooks:
+      post:
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ .StagedPath }}/assay"]
+          end
