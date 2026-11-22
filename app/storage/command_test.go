@@ -84,6 +84,7 @@ func TestSandboxLimitsCommands(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	project := t.TempDir()
 	os.MkdirAll(filepath.Join(project, ".assay"), 0700)
+	os.MkdirAll(filepath.Join(project, ".git", "hooks"), 0700)
 	os.WriteFile(filepath.Join(project, ".assay", "assay.db"), []byte("state"), 0600)
 	t.Setenv("ASSAY_TEST_SECRET", "s3cret")
 	t.Setenv("ASSAY_TEST_ALLOWED", "visible")
@@ -101,7 +102,7 @@ func TestSandboxLimitsCommands(t *testing.T) {
 	}, "; ")
 	run := commandRun(t, configWith(true,
 		backend.CommandSpec{Name: "probe", Run: sh(script), Env: []string{"ASSAY_TEST_ALLOWED"}, Caches: []string{"GOCACHE"}},
-		backend.CommandSpec{Name: "writer", Run: sh(`echo x > project.txt && echo project-write-ok; echo x > .assay/evil 2>/dev/null || echo state-write-denied`), WritesProject: true},
+		backend.CommandSpec{Name: "writer", Run: sh(`echo x > project.txt && echo project-write-ok; echo x > .assay/evil 2>/dev/null || echo state-write-denied; echo x > .git/hooks/pre-commit 2>/dev/null || echo git-write-denied`), WritesProject: true},
 	), project, commandRule("probe", "probe"), commandRule("writer", "writer"))
 
 	output := func(i int) string {
@@ -114,7 +115,7 @@ func TestSandboxLimitsCommands(t *testing.T) {
 			t.Errorf("probe output lacks %q:\n%s", want, output(0))
 		}
 	}
-	for _, want := range []string{"project-write-ok", "state-write-denied"} {
+	for _, want := range []string{"project-write-ok", "state-write-denied", "git-write-denied"} {
 		if !strings.Contains(output(1), want) {
 			t.Errorf("writer output lacks %q:\n%s", want, output(1))
 		}
