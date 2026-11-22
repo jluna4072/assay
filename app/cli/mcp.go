@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -51,7 +52,9 @@ Contracts are YAML files in the project's assay/ directory (see get_contract for
 
 get_contract shows what each rule requires: its criterion, its check, the rules it depends on, and the evidence it records. Read it before working toward a contract.
 
-check starts a run of a published contract and returns its first attempt; after changing the project, recheck adds an attempt to the same run. When a rule fails, read its reason in the result, and get_evidence shows exactly what was checked (file contents, diffs, command output, and what a reviewer was sent and answered).`
+check starts a run of a published contract and returns its first attempt; after changing the project, recheck adds an attempt to the same run. When a rule fails, read its reason in the result, and get_evidence shows exactly what was checked (file contents, diffs, command output, and what a reviewer was sent and answered).
+
+To hand a task to a worker configured in .assay/config.yaml instead of doing it yourself, start_work runs "assay work" in the background: the worker works in a new git worktree, and assay checks each attempt and sends back what failed. Follow it with get_run and wait_seconds; the result is a branch for the person to review and merge.`
 
 func runMCP(e Env, cmd *command, args []string) int {
 	fs := flag.NewFlagSet(cmd.name, flag.ContinueOnError)
@@ -81,7 +84,12 @@ func runMCP(e Env, cmd *command, args []string) int {
 	}
 	ctx, stop := interruptible(e)
 	defer stop()
-	if err := newMCPServer(p.Root).Run(ctx, &mcp.StdioTransport{}); err != nil && ctx.Err() == nil {
+	server, work := newMCPServer(p.Root)
+	err = server.Run(ctx, &mcp.StdioTransport{})
+	// The client is gone: stop the work it started, and let each run
+	// record that it was cancelled.
+	work.stopAll(mcpStopWait)
+	if err != nil && ctx.Err() == nil {
 		fmt.Fprintf(e.Stderr, "assay mcp: %v\n", err)
 		return ExitOperational
 	}
@@ -91,6 +99,7 @@ func runMCP(e Env, cmd *command, args []string) int {
 // mcpTool runs one command for a tool call.
 type mcpTool struct {
 	root string
+	work *mcpWork
 }
 
 // run runs "assay <args> --json" in the project and turns what it printed
@@ -99,6 +108,11 @@ type mcpTool struct {
 func (t mcpTool) run(ctx context.Context, args ...string) *mcp.CallToolResult {
 	var stdout, stderr bytes.Buffer
 	code := Run(args, Env{Stdout: &stdout, Stderr: &stderr, Dir: t.root, Context: ctx})
+	return commandResult(code, &stdout, &stderr)
+}
+
+// commandResult is a tool's result from what a command printed.
+func commandResult(code int, stdout, stderr *bytes.Buffer) *mcp.CallToolResult {
 	result := &mcp.CallToolResult{IsError: code == ExitUsage || code == ExitOperational}
 	if text := strings.TrimSpace(stdout.String()); text != "" {
 		result.Content = append(result.Content, &mcp.TextContent{Text: text})
@@ -168,10 +182,12 @@ type (
 		Run      string `json:"run,omitempty" jsonschema:"a run ID or any unique prefix; the most recent run when empty"`
 		Attempt  int    `json:"attempt,omitempty" jsonschema:"only this attempt (1-based)"`
 		Evidence bool   `json:"evidence,omitempty" jsonschema:"include each result's evidence list"`
+		Wait     int    `json:"wait_seconds,omitempty" jsonschema:"for a work run that is running: wait up to this many seconds (at most 120) for its next attempt or its end before answering"`
 	}
 	evidenceInput struct {
 		Run     string `json:"run,omitempty" jsonschema:"a run ID or any unique prefix; the most recent run when empty"`
-		Rule    string `json:"rule" jsonschema:"the rule ID"`
+		Rule    string `json:"rule,omitempty" jsonschema:"the rule ID (not needed with worker)"`
+		Worker  string `json:"worker,omitempty" jsonschema:"for a work run: prompt for exactly what the worker was given, or output for what it printed, instead of a rule's evidence"`
 		Attempt int    `json:"attempt,omitempty" jsonschema:"the attempt (1-based); the latest when empty"`
 		Item    int    `json:"item,omitempty" jsonschema:"only this evidence item (1-based)"`
 	}
@@ -186,9 +202,9 @@ var (
 	checks = &mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(true)}
 )
 
-func newMCPServer(root string) *mcp.Server {
+func newMCPServer(root string) (*mcp.Server, *mcpWork) {
 	server := mcp.NewServer(&mcp.Implementation{Name: "assay", Version: version()}, &mcp.ServerOptions{Instructions: mcpInstructions})
-	t := mcpTool{root: root}
+	t := mcpTool{root: root, work: &mcpWork{runs: map[string]*mcpRunning{}}}
 	// Commands find the project from the directory they run in, the root.
 	with := func(args ...string) []string { return append(args, "--json") }
 
@@ -275,7 +291,7 @@ func newMCPServer(root string) *mcp.Server {
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_run",
-		Description: "Get a run: every attempt with each rule's result and reason, and for work runs the task, worker, and outcome.",
+		Description: "Get a run: every attempt with each rule's result and reason, and for work runs the task, worker, branch, and outcome (running until it ends). Set wait_seconds to wait for a running work run's next attempt or its end.",
 		Annotations: readOnly,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in getRunInput) (*mcp.CallToolResult, any, error) {
 		args := with("show")
@@ -288,18 +304,38 @@ func newMCPServer(root string) *mcp.Server {
 		if in.Run != "" {
 			args = append(args, "--", in.Run)
 		}
+		if in.Wait > 0 {
+			return t.waitForRun(ctx, args, time.Duration(in.Wait)*time.Second), nil, nil
+		}
 		return t.run(ctx, args...), nil, nil
 	})
 
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "get_evidence",
-		Description: "Get the evidence recorded for a rule in an attempt, with its content: files, diffs, command output, and the exact request a reviewer was sent and its response.",
+		Description: "Get the evidence recorded for a rule in an attempt, with its content: files, diffs, command output, and the exact request a reviewer was sent and its response. For a work run, worker: prompt or output shows what the worker was given (including what failed before) or what it printed in an attempt.",
 		Annotations: readOnly,
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in evidenceInput) (*mcp.CallToolResult, any, error) {
+		args := with("evidence")
+		switch in.Worker {
+		case "prompt", "output":
+			if in.Rule != "" || in.Item != 0 {
+				return toolError(errors.New("worker shows the worker's prompt or output; leave rule and item out")), nil, nil
+			}
+			args = append(args, "--"+in.Worker)
+			if in.Attempt != 0 {
+				args = append(args, "--attempt", strconv.Itoa(in.Attempt))
+			}
+			if in.Run != "" {
+				args = append(args, "--", in.Run)
+			}
+			return t.run(ctx, args...), nil, nil
+		case "":
+		default:
+			return toolError(fmt.Errorf("worker is prompt or output, not %q", in.Worker)), nil, nil
+		}
 		if err := required("rule", in.Rule); err != nil {
 			return toolError(err), nil, nil
 		}
-		args := with("evidence")
 		if in.Attempt != 0 {
 			args = append(args, "--attempt", strconv.Itoa(in.Attempt))
 		}
@@ -312,5 +348,6 @@ func newMCPServer(root string) *mcp.Server {
 		}
 		return t.run(ctx, append(args, in.Rule)...), nil, nil
 	})
-	return server
+	addWorkTools(server, t)
+	return server, t.work
 }

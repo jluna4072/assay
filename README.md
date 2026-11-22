@@ -29,6 +29,36 @@ Contracts are YAML files in `assay/`, committed with the project. Published vers
 
 See [the command line guide](docs/cli.md) for the contract format, every command, and the JSON output.
 
+## Use it with Claude Code
+
+assay works as Claude Code's referee: Claude writes contracts, asks you to publish them, checks its own work, reads why rules failed, and can hand tasks to workers. It can't publish a contract or decide on its own that it's done.
+
+**1. Add the MCP server once.** It finds the project from the folder Claude Code is running in, so one entry covers every project you've run `assay init` in:
+
+```sh
+claude mcp add --scope user assay -- assay mcp
+```
+
+(Use `claude mcp add assay -- assay mcp` inside a project to add it to that project only.)
+
+**2. Set up each project.** Run `assay init`, then approve the commands and configure the reviewers your contracts use in `.assay/config.yaml` (see [the guide](docs/cli.md)). To reuse a group of contracts, `assay suite add <name>`.
+
+**3. Tell Claude how you work.** Add this to the project's `CLAUDE.md` (or `~/.claude/CLAUDE.md` for every project):
+
+```markdown
+## Definition of done: assay
+
+This project uses assay (the `assay` MCP server) to decide when work is done.
+
+- Before starting, find the contract for the task with `list_contracts` and read it with `get_contract`. If none fits, write one in `assay/<id>.yaml` (or a suite in `assay/suites/<id>/`), run `validate_contract` until it has no problems, show me `diff_contract`, and ask me to publish it. Never publish it yourself.
+- Write rules assay can check: `file_exists`, `command_succeeds` with commands approved in `.assay/config.yaml`, and `review` rules that list the evidence a reviewer needs (files, diffs, command output) for anything a command can't judge.
+- After making changes, run `check` the first time and `recheck` after that. When a rule fails, read its reason and `get_evidence`, fix it, and recheck. Don't change the contract to make it pass.
+- Don't tell me the work is done until `check` or `recheck` reports every rule passed, and give me the run ID.
+- To hand a task to a configured worker instead, use `start_work` and follow it with `get_run` and `wait_seconds`; tell me the branch to review. Nothing is merged for me.
+```
+
+**4. Ask for work as usual.** For example: "Add install steps to the README, and write an assay contract that checks they're clear", or "Use assay to have the codex worker add tests until the `tests` contract passes." Publish contracts when Claude asks, with `assay contract publish <file>` or `p` in `assay`; watch runs in `assay` or with `assay show --follow`.
+
 ## Develop
 
 From `app/`:
@@ -67,7 +97,7 @@ Work lands in small pull requests, each reviewed before the next one starts.
 3. **Model review.** Evaluate subjective rules with a reviewer the user chooses: any program speaking assay's review protocol, then built-in support for decision models such as TypeSafe's Jev, OpenAI-compatible and local servers, and Anthropic's API. Reviewer errors never produce a pass.
 4. **Worker and repair loop.** `assay work` runs a worker in a restricted workspace, returns failures as repair context, and retries within attempt and time limits.
 5. **Terminal UI.** `assay` at a terminal opens a full-screen view of contracts, runs, and evidence, then gains actions and live work runs.
-6. **MCP and Claude Code.** `assay mcp` lets an agent validate contracts, check its work, and read runs and evidence, then start and cancel work runs; a Claude Code plugin adds a skill and a hook that won't let Claude stop while rules fail. Publishing stays under user control.
+6. **MCP and Claude Code.** `assay mcp` lets an agent validate contracts, check its work, read runs and evidence, and start and cancel work runs; the README shows how to set it up in Claude Code. Publishing stays under user control.
 7. **Distribution.** Release binaries and a Homebrew tap, plus `assay doctor` for setup.
 
 The first end-to-end milestone: an outside agent requests a task through MCP, assay rejects a flawed attempt, retries it, and `assay show` presents the evidence for the final decision.

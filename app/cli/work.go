@@ -140,7 +140,7 @@ func runWork(e Env, cmd *command, args []string) int {
 	run, err := s.service.Work(ctx, backend.WorkOptions{
 		ContractID: id, Version: published.Version, ProjectDir: s.project.Root,
 		Task: *task, Worker: *worker, MaxAttempts: *maxAttempts, Timeout: *timeout,
-	}, printer.event)
+	}, workEvents(e, printer))
 	if err != nil {
 		fmt.Fprintf(e.Stderr, "assay work: %v\n", err)
 		return ExitOperational
@@ -173,12 +173,23 @@ func resumeWork(e Env, cmd *command, projectDir, prefix string, maxAttempts int,
 	ctx, stop := interruptible(e)
 	defer stop()
 	printer := &workPrinter{w: e.Stderr, root: s.project.Root, quiet: quiet}
-	run, err := s.service.ResumeWork(ctx, backend.ResumeOptions{RunID: run.ID, MaxAttempts: maxAttempts, Timeout: timeout}, printer.event)
+	run, err := s.service.ResumeWork(ctx, backend.ResumeOptions{RunID: run.ID, MaxAttempts: maxAttempts, Timeout: timeout}, workEvents(e, printer))
 	if err != nil {
 		fmt.Fprintf(e.Stderr, "assay work: %v\n", err)
 		return ExitUsage
 	}
 	return finishWork(e, s, run, asJSON)
+}
+
+// workEvents prints a work run's progress and tells e.WorkStarted which
+// run it is as soon as it starts.
+func workEvents(e Env, printer *workPrinter) func(backend.Event) {
+	return func(event backend.Event) {
+		if event.Type == backend.EventRunStarted && e.WorkStarted != nil {
+			e.WorkStarted(event.Run.ID)
+		}
+		printer.event(event)
+	}
 }
 
 func finishWork(e Env, s *session, run backend.Run, asJSON bool) int {
