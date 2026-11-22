@@ -744,8 +744,12 @@ Each tool runs the matching command with `--json` in the project and returns wha
 | `check` | `assay check <contract>` |
 | `recheck` | `assay recheck [run]` |
 | `list_runs` | `assay runs [--contract] [--limit]` |
-| `get_run` | `assay show [run] [--attempt] [--evidence]` |
-| `get_evidence` | `assay evidence [run] <rule> [--attempt] [--item]` |
+| `get_run` | `assay show [run] [--attempt] [--evidence]`; with `wait_seconds` (up to 120), waits while a work run is running for its next attempt or its end |
+| `get_evidence` | `assay evidence [run] <rule> [--attempt] [--item]`, or with `worker: prompt` or `output`, `assay evidence [run] --prompt` or `--output [--attempt]` |
+| `start_work` | `assay work <contract> --task … [--worker] [--max-attempts] [--timeout]`, or `--resume <run>`, in the background: returns the run ID as soon as the run starts |
+| `cancel_work` | cancels work this server started, waits for it to record that, and returns the run |
+
+Work started over MCP runs in the server: at most 3 runs at once, each in its own worktree as usual. When the client disconnects, the server cancels its work and waits for each run to record that before exiting, so no run is left marked as running. Its progress is stored like any work run, so `assay show --follow` and the UI's Work page follow it from another terminal.
 
 There's no tool to publish: an agent writes the contract file, validates it, and shows you the diff, and you publish it with `assay contract publish` or `p` in the UI. The server's instructions tell the agent this, and that work is done only when a check passes. Reviewer keys come from the environment or the Keychain; the server never asks for one, so a missing key is reported as the rule's error.
 

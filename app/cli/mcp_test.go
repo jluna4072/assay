@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -17,7 +18,9 @@ func mcpClient(t *testing.T, dir string) *mcp.ClientSession {
 	t.Helper()
 	ctx := context.Background()
 	serverSide, clientSide := mcp.NewInMemoryTransports()
-	if _, err := newMCPServer(dir).Connect(ctx, serverSide, nil); err != nil {
+	server, work := newMCPServer(dir)
+	t.Cleanup(func() { work.stopAll(10 * time.Second) })
+	if _, err := server.Connect(ctx, serverSide, nil); err != nil {
 		t.Fatal(err)
 	}
 	session, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil).Connect(ctx, clientSide, nil)
@@ -71,7 +74,7 @@ func TestMCPTools(t *testing.T) {
 			t.Errorf("there is a publish tool: %s", tool.Name)
 		}
 	}
-	want := []string{"check", "diff_contract", "get_contract", "get_evidence", "get_run", "list_contracts", "list_runs", "recheck", "validate_contract"}
+	want := []string{"cancel_work", "check", "diff_contract", "get_contract", "get_evidence", "get_run", "list_contracts", "list_runs", "recheck", "start_work", "validate_contract"}
 	slices.Sort(names)
 	if !slices.Equal(names, want) {
 		t.Errorf("tools %v, want %v", names, want)

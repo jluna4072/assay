@@ -47,6 +47,9 @@ type Env struct {
 	ReadSecret func(prompt string) (string, error)
 	// Context, when set, cancels long-running commands such as work.
 	Context context.Context
+	// WorkStarted, when set, is told the ID of the run "assay work" makes
+	// (or resumes) as soon as it starts, for running work in the background.
+	WorkStarted func(runID string)
 }
 
 // DefaultEnv returns the environment of the running process.
