@@ -132,6 +132,10 @@ func sandboxProfile(spec CommandSpec, workspace bool) string {
 			b.WriteString("(allow file-write* (subpath (param \"PROJECT\")))\n")
 		}
 	}
+	// Never the repository: a rewritten .git (a workspace's pointer file,
+	// or a hook or config in the project's own) would run code when
+	// assay or the user next runs git.
+	b.WriteString("(deny file-write* (literal (string-append (param \"PROJECT\") \"/.git\")) (subpath (string-append (param \"PROJECT\") \"/.git\")))\n")
 	b.WriteString(`(allow file-write*
   (subpath (param "SCRATCH"))
   (subpath (param "CACHE"))

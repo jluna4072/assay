@@ -251,7 +251,7 @@ func (s *Service) workLoop(ctx context.Context, store RunRepository, run Run, co
 				return finish(WorkError, fmt.Sprintf("checking attempt %d failed: %v", number, err))
 			}
 		}
-		if commit, err := commitWorkspace(run.Work.Workspace, run.ID, number); err != nil {
+		if commit, err := commitWorkspace(run.ProjectDir, run.Work.Workspace, run.ID, number); err != nil {
 			record.Error = strings.TrimSpace(record.Error + " " + fmt.Sprintf("commit the workspace: %v", err))
 		} else {
 			record.Commit = commit
@@ -506,22 +506,26 @@ func (s *Service) runWorker(ctx context.Context, worker WorkerSpec, config Confi
 // commit, or "" when nothing changed. assay's own state is never
 // committed. Hooks and signing are skipped: the commit records the
 // worker's result, and must not run project code or ask for anything.
-func commitWorkspace(workspace, runID string, number int) (string, error) {
-	if _, err := git(workspace, nil, "add", "--all", "--", ".", ":(exclude).assay"); err != nil {
+func commitWorkspace(root, workspace, runID string, number int) (string, error) {
+	env, err := workspaceEnv(root, workspace)
+	if err != nil {
 		return "", err
 	}
-	if _, err := git(workspace, nil, "diff", "--cached", "--quiet"); err == nil {
+	if _, err := git(workspace, env, "add", "--all", "--", ".", ":(exclude).assay"); err != nil {
+		return "", err
+	}
+	if _, err := git(workspace, env, "diff", "--cached", "--quiet", "--no-ext-diff"); err == nil {
 		return "", nil
 	}
 	args := []string{"-c", "commit.gpgsign=false"}
-	if name, _ := git(workspace, nil, "config", "user.email"); strings.TrimSpace(string(name)) == "" {
+	if name, _ := git(workspace, env, "config", "user.email"); strings.TrimSpace(string(name)) == "" {
 		args = append(args, "-c", "user.name=assay", "-c", "user.email=assay@localhost")
 	}
 	message := fmt.Sprintf("assay: attempt %d of run %s", number, strings.ToLower(runID))
-	if _, err := git(workspace, nil, append(args, "commit", "--quiet", "--no-verify", "-m", message)...); err != nil {
+	if _, err := git(workspace, env, append(args, "commit", "--quiet", "--no-verify", "-m", message)...); err != nil {
 		return "", err
 	}
-	head, err := git(workspace, nil, "rev-parse", "HEAD")
+	head, err := git(workspace, env, "rev-parse", "HEAD")
 	return strings.TrimSpace(string(head)), err
 }
 

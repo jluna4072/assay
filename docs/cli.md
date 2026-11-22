@@ -148,7 +148,7 @@ commands:
 On macOS, approved commands run under the system sandbox (`sandbox-exec`). For a command and everything it starts:
 
 - **No network** unless the command allows `localhost` (connecting to and listening on local ports) or `on`.
-- **Writes only to a scratch directory** (`TMPDIR`, emptied after each attempt) and the command's declared caches (kept between attempts). With `writes: project` it may also write anywhere in the project, but never in `.assay/`.
+- **Writes only to a scratch directory** (`TMPDIR`, emptied after each attempt) and the command's declared caches (kept between attempts). With `writes: project` it may also write anywhere in the project, but never in `.assay/` or `.git`, so no command or worker can add a git hook or point a workspace at another repository.
 - **No reading** `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.docker`, `~/.config/gh`, `~/.netrc`, the keychains, or assay's database.
 - **A cleared environment**: `PATH`, `HOME`, `LANG`, `TMPDIR`, `XDG_CACHE_HOME`, plus the variables in `env` and `caches`. Nothing else from your environment is passed.
 - **A timeout** that stops the command and every process it started.
@@ -156,6 +156,8 @@ On macOS, approved commands run under the system sandbox (`sandbox-exec`). For a
 Toolchains that write caches outside the project need them declared. For Go, `caches: [GOCACHE]`; downloaded modules in `~/go/pkg/mod` are readable, but new downloads need `network: on`.
 
 If the sandbox isn't available (on Linux, for example), commands can't run and their rules report `error`. `sandbox: off` runs them without it; their evidence is then marked unsandboxed (`unsandboxed` in `show --evidence`, `"sandboxed": false` in JSON).
+
+assay's own git commands (committing a workspace, collecting diffs) run outside the sandbox, so they never trust what a worker could have written: a workspace's git directory is looked up in the project's repository rather than read from its `.git` file, git hooks and `core.fsmonitor` are turned off, diffs skip external and textconv drivers, and `GIT_*` variables from your environment are ignored.
 
 A command with `writes: project` changes the project for rules checked after it in the same attempt. Prefer scratch writes; see `docs/spikes/command-sandbox.md` for how the sandbox was tested.
 

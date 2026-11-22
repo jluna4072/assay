@@ -2,18 +2,15 @@ package backend
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
-	"time"
 )
 
 // EvidenceKind names a built-in evidence collector. Contracts choose from
@@ -243,7 +240,12 @@ func (c *collector) diff(paths []string) Evidence {
 	if len(paths) > 0 {
 		selected = paths
 	}
-	env := []string{"GIT_INDEX_FILE=" + index.Name()}
+	env, err := workspaceEnv(c.root, c.projectDir)
+	if err != nil {
+		item.Error = err.Error()
+		return item
+	}
+	env = append(env, "GIT_INDEX_FILE="+index.Name())
 	// git add rejects paths that don't exist. A path that is gone or not
 	// created yet still appears in the diff through the baseline side.
 	var present []string
@@ -265,13 +267,13 @@ func (c *collector) diff(paths []string) Evidence {
 		return item
 	}
 	pathspec := append(append([]string{"--"}, selected...), ":(exclude).assay")
-	diffArgs := []string{"-c", "core.quotepath=false", "diff", "--cached", "--no-color", "--no-ext-diff", "--no-renames", "--binary"}
+	diffArgs := []string{"-c", "core.quotepath=false", "diff", "--cached", "--no-color", "--no-ext-diff", "--no-textconv", "--no-renames", "--binary"}
 	content, err := git(c.projectDir, env, append(append(diffArgs, c.baseline), pathspec...)...)
 	if err != nil {
 		item.Error = err.Error()
 		return item
 	}
-	names, err := git(c.projectDir, env, append([]string{"diff", "--cached", "--no-renames", "--name-only", "-z", c.baseline}, pathspec...)...)
+	names, err := git(c.projectDir, env, append([]string{"diff", "--cached", "--no-ext-diff", "--no-textconv", "--no-renames", "--name-only", "-z", c.baseline}, pathspec...)...)
 	if err != nil {
 		item.Error = err.Error()
 		return item
@@ -293,23 +295,4 @@ func Baseline(dir string) string {
 		return EmptyTree
 	}
 	return strings.TrimSpace(string(head))
-}
-
-// git runs a git command in dir with a timeout and returns its stdout.
-func git(dir string, env []string, args ...string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), env...)
-	var stdout, stderr bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
-		message := strings.TrimSpace(stderr.String())
-		if message == "" {
-			message = err.Error()
-		}
-		return nil, fmt.Errorf("git %s: %s", args[0], message)
-	}
-	return stdout.Bytes(), nil
 }

@@ -205,11 +205,13 @@ echo "# Project" > README.md && echo wrote-workspace
 echo x > "` + dir + `/escaped.txt" 2>/dev/null && echo wrote-project
 echo x > "` + dir + `/.assay/escaped.txt" 2>/dev/null && echo wrote-state
 echo x > "` + home + `/escaped.txt" 2>/dev/null && echo wrote-elsewhere
+echo "gitdir: /tmp/forged" > .git 2>/dev/null && echo wrote-git
+rm -f .git 2>/dev/null && [ ! -e .git ] && echo removed-git
 echo done > done.txt
 true`
 	run, _ := work(t, dir, s, workConfig(true, map[string]string{"boxed": script}), "boxed", 1, time.Minute)
 	out := string(mustBlob(t, run, run.Attempts[0].Worker.Output))
-	if !strings.Contains(out, "wrote-workspace") || strings.Contains(out, "wrote-project") || strings.Contains(out, "wrote-state") || strings.Contains(out, "wrote-elsewhere") {
+	if !strings.Contains(out, "wrote-workspace") || strings.Contains(out, "wrote-project") || strings.Contains(out, "wrote-state") || strings.Contains(out, "wrote-elsewhere") || strings.Contains(out, "wrote-git") || strings.Contains(out, "removed-git") {
 		t.Fatalf("worker output:\n%s", out)
 	}
 	if run.Work.Outcome != backend.WorkAccepted || !run.Attempts[0].Worker.Sandboxed {
